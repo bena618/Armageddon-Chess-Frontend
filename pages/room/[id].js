@@ -1,6 +1,6 @@
 import {useRouter} from 'next/router'
 import {useEffect,useState} from 'react'
-const BASE='https://armageddon-chess.benaharon1.workers.dev'
+const BASE = process.env.NEXT_PUBLIC_BACKEND_URL
 export default function Room(){
   const r = useRouter();
   const {id} = r.query;
@@ -17,9 +17,18 @@ export default function Room(){
   }
   async function join(){
     if(!name) return
-    await fetch(`${BASE}/rooms/${id}/join`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({playerId:name,name})})
-    setJoined(true)
-    fetchState()
+    try {
+      const res = await fetch(`${BASE}/rooms/${id}/join`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerId: name, name }) });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'unknown' }));
+        alert('Failed to join: ' + (err.error || res.statusText));
+        return;
+      }
+      setJoined(true);
+      await fetchState();
+    } catch (e) {
+      alert('Network error joining room');
+    }
   }
   function copyLink(){ navigator.clipboard.writeText(location.href) }
   if(!id) return <div className="container">Loading…</div>

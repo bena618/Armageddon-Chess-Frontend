@@ -1,16 +1,29 @@
 import { useRouter } from 'next/router'
 import { useState } from 'react'
-const BASE = 'https://armageddon-chess.benaharon1.workers.dev'
+const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
+
 export default function Home(){
   const r = useRouter()
   const [name,setName]=useState('')
   const [loading,setLoading]=useState(false)
   async function create(){
     setLoading(true)
-    const res = await fetch(`${BASE}/rooms`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})
-    const j = await res.json()
-    const roomId = j.roomId || j?.meta?.roomId || j?.roomId
-    r.push(`/room/${roomId}?name=${encodeURIComponent(name)}`)
+    try {
+      const res = await fetch(`${BASE}/rooms`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'unknown' }));
+        alert('Failed to create room: ' + (err.error || res.statusText));
+        return;
+      }
+      const j = await res.json().catch(() => ({}));
+      const roomId = j.roomId || j?.meta?.roomId || j?.roomId;
+      if (!roomId) return alert('No room id returned');
+      r.push(`/room/${roomId}?name=${encodeURIComponent(name)}`);
+    } catch (e) {
+      alert('Network error creating room');
+    } finally {
+      setLoading(false);
+    }
   }
   return (
     <main className="container">
