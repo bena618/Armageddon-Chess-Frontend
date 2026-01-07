@@ -33,5 +33,5 @@ export default function Home(){
         <button onClick={create} disabled={loading||!name}>Play</button>
       </div>
     </main>
-  )
+  ) 
 }
