@@ -1,6 +1,6 @@
 import { useRouter } from 'next/router'
 import { useState } from 'react'
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
+const BASE = process.env.NEXT_PUBLIC_BACKEND_URL; 
 
 export default function Home(){
   const r = useRouter()
