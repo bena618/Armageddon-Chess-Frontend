@@ -1,10 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
-  trailingSlash: true, // Helps with static routing
+  trailingSlash: true,
   images: {
-    unoptimized: true, // Required for static export
+    unoptimized: true,
   },
+  // Force generation of fallback for dynamic routes
+  generateBuildId: () => 'static-build',
 };
 
 module.exports = nextConfig;
