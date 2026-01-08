@@ -37,7 +37,7 @@ export default function Room() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
-        setError(err.error || 'Failed to join');
+        setError(err.error || 'Failed to auto-join room');
         setLoading(false);
         return;
       }
@@ -45,8 +45,7 @@ export default function Room() {
       setJoined(true);
       await fetchState();
     } catch (e) {
-      setError('Network error joining room');
-    } finally {
+      setError('Network error auto-joining room');
       setLoading(false);
     }
   }
@@ -55,6 +54,8 @@ export default function Room() {
     if (!name.trim()) return;
 
     setLoading(true);
+    setError(null);
+
     const playerId = crypto.randomUUID();
 
     localStorage.setItem('playerName', name.trim());
@@ -70,6 +71,7 @@ export default function Room() {
       const data = await res.json();
       setState(data.room || data);
     } catch (e) {
+      console.error(e);
       setError('Failed to load room state');
     }
   }
@@ -77,15 +79,15 @@ export default function Room() {
   useEffect(() => {
     if (!id || !joined) return;
 
+    fetchState(); // Initial fetch
     const interval = setInterval(fetchState, 2000);
-    fetchState();
 
     return () => clearInterval(interval);
   }, [id, joined]);
 
   function copyLink() {
-    navigator.clipboard.writeText(window.location.href.replace(/\?.*/, ''));
-    alert('Link copied!');
+    const cleanUrl = window.location.origin + window.location.pathname;
+    navigator.clipboard.writeText(cleanUrl);
   }
 
   if (!id) return <div className="container">Loading room...</div>;
@@ -97,7 +99,7 @@ export default function Room() {
       <h2>Room {id}</h2>
 
       <div className="share">
-        <input readOnly value={typeof window !== 'undefined' ? window.location.href.split('?')[0] : ''} />
+        <input readOnly value={typeof window !== 'undefined' ? window.location.origin + window.location.pathname : ''} />
         <button onClick={copyLink}>Copy Link</button>
       </div>
 
@@ -125,7 +127,7 @@ export default function Room() {
               ? JSON.stringify(
                   {
                     phase: state.phase,
-                    players: state.players,
+                    players: state.players.map(p => ({ name: p.name, id: p.id.slice(0, 8) + '...' })),
                     bids: state.bids ? Object.keys(state.bids) : [],
                   },
                   null,
