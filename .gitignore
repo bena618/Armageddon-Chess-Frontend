@@ -1,3 +1,12 @@
+# Next.js
+.next/
+out/
+node_modules/
+
+# Environment
 .env.local
-node_modules
-.next
+.env.development.local
+.env.production.local
+
+# Misc
+.DS_Store
