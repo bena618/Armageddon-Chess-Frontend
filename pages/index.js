@@ -30,9 +30,11 @@ export default function Home() {
       }
 
       const createData = await createRes.json();
-      const roomId = createData.roomId;
+      console.log('create response', createData);
+      // try several locations for roomId in case the backend shape varies
+      const roomId = createData?.roomId || createData?.meta?.roomId || (createData?.meta && createData.meta.room && createData.meta.room.roomId) || null;
       if (!roomId) {
-        alert('No room ID returned');
+        alert('No room ID returned — check console for create response');
         setLoading(false);
         return;
       }
