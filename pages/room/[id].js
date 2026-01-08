@@ -144,7 +144,7 @@ export default function Room() {
 export async function getStaticPaths() {
   return {
     paths: [],
-    fallback: 'blocking',
+    fallback: true,
   };
 }
 
