@@ -79,7 +79,7 @@ export default function Room() {
   useEffect(() => {
     if (!id || !joined) return;
 
-    fetchState(); // Initial fetch
+    fetchState(); 
     const interval = setInterval(fetchState, 2000);
 
     return () => clearInterval(interval);
@@ -139,4 +139,15 @@ export default function Room() {
       )}
     </main>
   );
+}
+
+export async function getStaticPaths() {
+  return {
+    paths: [],
+    fallback: 'blocking',
+  };
+}
+
+export async function getStaticProps() {
+  return { props: {} };
 }
