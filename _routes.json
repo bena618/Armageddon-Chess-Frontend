@@ -1,5 +1,13 @@
 {
   "version": 1,
-  "include": ["/*"],
-  "exclude": ["/room/*"]
+  "routes": [
+    {
+      "src": "/room/.*",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/.*",
+      "dest": "/$0"
+    }
+  ]
 }
