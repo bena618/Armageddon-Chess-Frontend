@@ -65,6 +65,11 @@ export default function RoomIndex() {
       setJoined(true);
       // Immediately fetch state to update UI
       await fetchState();
+      // force a client-side navigation refresh to ensure the room UI (bidding/etc) mounts
+      try {
+        const p = window.location.pathname;
+        router.replace(p + '?_joined=' + Date.now());
+      } catch (e) { /* ignore */ }
     } catch (e) {
       console.error('autoJoin error', e);
       setError('Network error joining room: ' + (e && e.message));
