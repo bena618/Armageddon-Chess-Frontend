@@ -325,11 +325,17 @@ export default function Room() {
   async function startBidding() {
     const backendId = getBackendRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${backendId}/start-bidding`, { method: 'POST' });
+      const res = await fetch(`${BASE}/rooms/${backendId}/start-bidding`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerId: playerIdRef.current }) });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setError('Failed to start bidding: ' + (err.error || res.status));
         return;
+      }
+      // if server returned startRequestedBy, surface a small message
+      const body = await res.json().catch(() => ({}));
+      if (body.startRequestedBy && body.startConfirmDeadline) {
+        const by = state.players.find(p => p.id === body.startRequestedBy);
+        setMessage((by && by.name) ? `${by.name} requested bidding; waiting for confirmation` : 'Bidding requested; waiting for confirmation');
       }
     } catch (e) { setError('Network error'); }
   }
@@ -645,7 +651,7 @@ export default function Room() {
 
           {state.phase === 'COLOR_PICK' && (
             <div>
-              <p>Winner: {state.winnerId}</p>
+              <p>Winner: {(state.players && state.players.find(p => p.id === state.winnerId) && state.players.find(p => p.id === state.winnerId).name) || state.winnerId || '—'}</p>
               <p>Current picker: {state.currentPicker}</p>
               {(() => {
                 const canChoose = (state.currentPicker === 'winner' && playerId === state.winnerId) || (state.currentPicker === 'loser' && playerId === state.loserId);
