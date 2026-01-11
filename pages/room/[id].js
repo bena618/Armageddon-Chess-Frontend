@@ -25,13 +25,13 @@ export default function Room() {
   const [promotionPending, setPromotionPending] = useState(null);
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
-  const lockedRoomIdRef = useRef(null); // Lock the room ID on first mount
+  const lockedRoomIdRef = useRef(null);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !queryId) return;
 
     // Lock the room ID on first valid query
-    if (!lockedRoomIdRef.current && queryId) {
+    if (!lockedRoomIdRef.current) {
       lockedRoomIdRef.current = queryId;
     }
 
@@ -230,8 +230,9 @@ export default function Room() {
   }
 
   async function startBidding() {
+    const targetId = lockedRoomIdRef.current || queryId;
     try {
-      const res = await fetch(`${BASE}/rooms/${queryId}/start-bidding`, { method: 'POST' });
+      const res = await fetch(`${BASE}/rooms/${targetId}/start-bidding`, { method: 'POST' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setError('Failed to start bidding: ' + (err.error || res.status));
@@ -249,8 +250,9 @@ export default function Room() {
     if (!Number.isFinite(secs) || secs < 0 || secs > 59) { setError('Seconds must be between 0 and 59'); return; }
     const ms = Math.floor(mins * 60 * 1000 + secs * 1000);
     if (state && typeof state.mainTimeMs === 'number' && ms > state.mainTimeMs) { setError('Bid cannot exceed game main time'); return; }
+    const targetId = lockedRoomIdRef.current || queryId;
     try {
-      const res = await fetch(`${BASE}/rooms/${queryId}/submit-bid`, {
+      const res = await fetch(`${BASE}/rooms/${targetId}/submit-bid`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, amount: ms }),
@@ -268,8 +270,9 @@ export default function Room() {
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return; }
+    const targetId = lockedRoomIdRef.current || queryId;
     try {
-      const res = await fetch(`${BASE}/rooms/${queryId}/choose-color`, {
+      const res = await fetch(`${BASE}/rooms/${targetId}/choose-color`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, color }),
@@ -324,8 +327,9 @@ export default function Room() {
       setGameOverInfo({ winnerId, winnerName, color: winnerColor });
     }
 
+    const targetId = lockedRoomIdRef.current || queryId;
     try {
-      const res = await fetch(`${BASE}/rooms/${queryId}/move`, {
+      const res = await fetch(`${BASE}/rooms/${targetId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, move: finalUci }),
