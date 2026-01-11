@@ -27,20 +27,28 @@ export default function Room() {
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
 
-  const getRoomId = () => {
-    if (typeof window === 'undefined') return queryId;
+  const roomIdRef = useRef(null); // Single source of truth for room ID
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Capture the REAL URL path on first load
     const path = window.location.pathname;
     const parts = path.split('/').filter(Boolean);
     const pathId = parts[1];
-    const idToUse = pathId || queryId;
-    console.log('Resolved room ID:', idToUse);
-    return idToUse;
-  };
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !queryId) return;
+    if (!roomIdRef.current) {
+      roomIdRef.current = pathId || queryId;
+      console.log('Locked room ID from path:', roomIdRef.current);
 
-    const roomId = getRoomId();
+      // Safety: force URL to match the locked ID (prevents Next.js drift)
+      if (pathId && queryId && pathId !== queryId) {
+        console.log('Drift detected! Forcing URL back to:', pathId);
+        router.replace(`/room/${pathId}`, undefined, { shallow: true, scroll: false });
+      }
+    }
+
+    const roomId = roomIdRef.current;
     if (!roomId) {
       setError('Invalid room URL');
       return;
@@ -56,12 +64,12 @@ export default function Room() {
     } else {
       setLoading(false);
     }
-  }, [queryId]);
+  }, [queryId, router]);
 
   async function autoJoin(playerId, playerName) {
-    const roomId = getRoomId();
+    const roomId = roomIdRef.current;
     if (!roomId) {
-      setError('No room ID in URL');
+      setError('No room ID available');
       return;
     }
 
@@ -100,7 +108,7 @@ export default function Room() {
   }
 
   function setupWebSocket() {
-    const roomId = getRoomId();
+    const roomId = roomIdRef.current;
     if (!roomId || !playerIdRef.current) return;
 
     const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${roomId}/ws?playerId=${playerIdRef.current}`;
@@ -181,7 +189,7 @@ export default function Room() {
   }
 
   async function fetchState() {
-    const roomId = getRoomId();
+    const roomId = roomIdRef.current;
     if (!roomId) return;
 
     try {
@@ -251,7 +259,7 @@ export default function Room() {
   }
 
   async function startBidding() {
-    const roomId = getRoomId();
+    const roomId = roomIdRef.current;
     try {
       const res = await fetch(`${BASE}/rooms/${roomId}/start-bidding`, { method: 'POST' });
       if (!res.ok) {
@@ -271,7 +279,7 @@ export default function Room() {
     if (!Number.isFinite(secs) || secs < 0 || secs > 59) { setError('Seconds must be between 0 and 59'); return; }
     const ms = Math.floor(mins * 60 * 1000 + secs * 1000);
     if (state && typeof state.mainTimeMs === 'number' && ms > state.mainTimeMs) { setError('Bid cannot exceed game main time'); return; }
-    const roomId = getRoomId();
+    const roomId = roomIdRef.current;
     try {
       const res = await fetch(`${BASE}/rooms/${roomId}/submit-bid`, {
         method: 'POST',
@@ -291,7 +299,7 @@ export default function Room() {
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return; }
-    const roomId = getRoomId();
+    const roomId = roomIdRef.current;
     try {
       const res = await fetch(`${BASE}/rooms/${roomId}/choose-color`, {
         method: 'POST',
@@ -348,7 +356,7 @@ export default function Room() {
       setGameOverInfo({ winnerId, winnerName, color: winnerColor });
     }
 
-    const roomId = getRoomId();
+    const roomId = roomIdRef.current;
     try {
       const res = await fetch(`${BASE}/rooms/${roomId}/move`, {
         method: 'POST',
@@ -452,7 +460,7 @@ export default function Room() {
 
   return (
     <main className="container">
-      <h2>Room {getRoomId()}</h2>
+      <h2>Room {roomIdRef.current || queryId}</h2>
 
       <div className="share">
         <input readOnly value={typeof window !== 'undefined' ? window.location.href.split('?')[0] : ''} />
