@@ -98,8 +98,13 @@ export default function Room() {
       }
     };
 
-    wsRef.current.onclose = () => {
-      console.log('WebSocket closed');
+    wsRef.current.onclose = (event) => {
+      console.log('WebSocket closed:', event.code, event.reason);
+      if (event.code !== 1000) {  // Not normal close
+        setTimeout(setupWebSocket, 3000);  // Reconnect after 3s
+      }
+    };
+      
     };
 
     wsRef.current.onerror = (e) => {
