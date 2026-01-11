@@ -26,17 +26,22 @@ export default function Room() {
   const [promotionPending, setPromotionPending] = useState(null);
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
-  const lockedRoomIdRef = useRef(null);
+
+  const getRoomId = () => {
+    if (typeof window === 'undefined') return queryId;
+    const path = window.location.pathname;
+    const parts = path.split('/').filter(Boolean);
+    const pathId = parts[1];
+    return pathId || queryId || null;
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined' || !queryId) return;
 
-    if (!lockedRoomIdRef.current) {
-      lockedRoomIdRef.current = queryId;
-    }
-
-    if (lockedRoomIdRef.current && queryId !== lockedRoomIdRef.current) {
-      router.replace(`/room/${lockedRoomIdRef.current}`, undefined, { shallow: true });
+    const currentId = getRoomId();
+    if (!currentId) {
+      setError('Invalid room URL');
+      return;
     }
 
     const savedName = localStorage.getItem('playerName');
@@ -47,20 +52,20 @@ export default function Room() {
       playerIdRef.current = savedPlayerId;
       autoJoin(savedPlayerId, savedName);
     } else {
-      setLoading(false); // Always show form for shared links if no saved player
+      setLoading(false);
     }
-  }, [queryId, router]);
+  }, [queryId]);
 
   async function autoJoin(playerId, playerName) {
-    const targetId = lockedRoomIdRef.current;
-    if (!targetId) {
-      setError('No room ID available');
+    const roomId = getRoomId();
+    if (!roomId) {
+      setError('No room ID in URL');
       return;
     }
 
     setJoining(true);
     try {
-      const res = await fetch(`${BASE}/rooms/${targetId}/join`, {
+      const res = await fetch(`${BASE}/rooms/${roomId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
@@ -88,10 +93,10 @@ export default function Room() {
   }
 
   function setupWebSocket() {
-    const targetId = lockedRoomIdRef.current;
-    if (!targetId || !playerIdRef.current) return;
+    const roomId = getRoomId();
+    if (!roomId || !playerIdRef.current) return;
 
-    const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${targetId}/ws?playerId=${playerIdRef.current}`;
+    const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${roomId}/ws?playerId=${playerIdRef.current}`;
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => console.log('WebSocket connected');
@@ -102,7 +107,7 @@ export default function Room() {
         console.log('WS received:', data.type, 'Players:', data.room?.players?.length || 'unknown');
         if (data.type === 'init' || data.type === 'update') {
           const room = data.room;
-          if (!room || !room.roomId || room.roomId !== targetId) {
+          if (!room || !room.roomId || room.roomId !== roomId) {
             setError('Room not found or invalid');
             return;
           }
@@ -169,16 +174,16 @@ export default function Room() {
   }
 
   async function fetchState() {
-    const targetId = lockedRoomIdRef.current;
-    if (!targetId) return;
+    const roomId = getRoomId();
+    if (!roomId) return;
 
     try {
-      const res = await fetch(`${BASE}/rooms/${targetId}`);
+      const res = await fetch(`${BASE}/rooms/${roomId}`);
       if (!res.ok) throw new Error('Failed to fetch state');
       const data = await res.json();
       const room = data.room || data;
       console.log('Fetched state - Players:', room.players?.length || 0);
-      if (!room || !room.roomId || room.roomId !== targetId) {
+      if (!room || !room.roomId || room.roomId !== roomId) {
         setError('Room not found');
         return;
       }
@@ -239,9 +244,9 @@ export default function Room() {
   }
 
   async function startBidding() {
-    const targetId = lockedRoomIdRef.current;
+    const roomId = getRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${targetId}/start-bidding`, { method: 'POST' });
+      const res = await fetch(`${BASE}/rooms/${roomId}/start-bidding`, { method: 'POST' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setError('Failed to start bidding: ' + (err.error || res.status));
@@ -259,9 +264,9 @@ export default function Room() {
     if (!Number.isFinite(secs) || secs < 0 || secs > 59) { setError('Seconds must be between 0 and 59'); return; }
     const ms = Math.floor(mins * 60 * 1000 + secs * 1000);
     if (state && typeof state.mainTimeMs === 'number' && ms > state.mainTimeMs) { setError('Bid cannot exceed game main time'); return; }
-    const targetId = lockedRoomIdRef.current;
+    const roomId = getRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${targetId}/submit-bid`, {
+      const res = await fetch(`${BASE}/rooms/${roomId}/submit-bid`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, amount: ms }),
@@ -279,9 +284,9 @@ export default function Room() {
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return; }
-    const targetId = lockedRoomIdRef.current;
+    const roomId = getRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${targetId}/choose-color`, {
+      const res = await fetch(`${BASE}/rooms/${roomId}/choose-color`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, color }),
@@ -336,9 +341,9 @@ export default function Room() {
       setGameOverInfo({ winnerId, winnerName, color: winnerColor });
     }
 
-    const targetId = lockedRoomIdRef.current;
+    const roomId = getRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${targetId}/move`, {
+      const res = await fetch(`${BASE}/rooms/${roomId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, move: finalUci }),
@@ -440,7 +445,7 @@ export default function Room() {
 
   return (
     <main className="container">
-      <h2>Room {lockedRoomIdRef.current || queryId}</h2>
+      <h2>Room {getRoomId()}</h2>
 
       <div className="share">
         <input readOnly value={typeof window !== 'undefined' ? window.location.href.split('?')[0] : ''} />
