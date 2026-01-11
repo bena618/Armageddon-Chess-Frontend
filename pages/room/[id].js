@@ -67,6 +67,53 @@ export default function Room() {
     }
   }, [queryId]);
 
+  function Countdown({ deadline, onExpire }) {
+    const [secs, setSecs] = useState(() => deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null);
+    const beepedRef = useRef(false);
+    useEffect(() => {
+      if (!deadline) return;
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        setSecs(s);
+        if (s <= 0) {
+          if (onExpire) onExpire();
+        }
+        if (s <= 5 && !beepedRef.current) {
+          // play short beep
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sine';
+            o.frequency.value = 880;
+            o.connect(g);
+            g.connect(ctx.destination);
+            g.gain.value = 0.001;
+            o.start();
+            g.gain.exponentialRampToValueAtTime(0.05, ctx.currentTime + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+            setTimeout(() => { try { o.stop(); ctx.close(); } catch(e){} }, 150);
+          } catch (e) {}
+          beepedRef.current = true;
+        }
+      };
+      tick();
+      const id = setInterval(tick, 500);
+      return () => clearInterval(id);
+    }, [deadline]);
+
+    if (secs === null) return null;
+    const pct = Math.max(0, Math.min(100, Math.round((secs / Math.max(1, Math.ceil((deadline - (Date.now()-secs*1000)) / 1000))) * 100)));
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ width: 120, height: 10, background: '#eee', borderRadius: 6, overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: '#ff8a00', transition: 'width 0.4s linear' }} />
+        </div>
+        <div style={{ fontSize: 12 }}>{secs}s</div>
+      </div>
+    );
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (ChessJS) return;
@@ -466,6 +513,23 @@ export default function Room() {
     'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
   };
 
+  // Render pieces as SVGs for crisper visuals and easier styling
+  const pieceUnicodeMap = {
+    'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚',
+    'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
+  };
+
+  function Piece({ piece }) {
+    const glyph = pieceUnicodeMap[piece] || '';
+    const isWhite = piece === piece.toUpperCase();
+    return (
+      <svg width="36" height="36" viewBox="0 0 36 36" style={{ display: 'block' }}>
+        <rect x="0" y="0" width="36" height="36" fill="transparent" />
+        <text x="50%" y="50%" dominantBaseline="middle" textAnchor="middle" fontSize="24" style={{ fill: isWhite ? '#fff' : '#111', stroke: isWhite ? '#111' : '#fff', strokeWidth: 0.5, fontFamily: 'serif' }}>{glyph}</text>
+      </svg>
+    );
+  }
+
   function fenToMatrix(fen) {
     const rows = fen.split(' ')[0].split('/');
     return rows.map(r => {
@@ -483,13 +547,27 @@ export default function Room() {
   const [selected, setSelected] = useState(null);
   function Board({fen}){
     const matrix = fen === 'start' ? fenToMatrix('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR') : fenToMatrix(fen);
+    // compute legal targets for the currently selected square
+    let legalTargets = new Set();
+    try {
+      if (selected && ChessJS && localGameRef.current) {
+        const g = new ChessJS(localGameRef.current.fen());
+        const moves = g.moves({ square: selected, verbose: true }) || [];
+        for (const m of moves) legalTargets.add(m.to);
+      }
+    } catch (e) {}
+
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8,44px)', gap: 0, border: '1px solid #333' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8,54px)', gap: 0, border: '2px solid #222', boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
         {matrix.flatMap((row, rIdx) => row.map((cell, cIdx) => {
           const rank = 8 - rIdx;
           const file = 'abcdefgh'[cIdx];
           const sq = `${file}${rank}`;
           const isLight = (rIdx + cIdx) % 2 === 0;
+          const baseColor = isLight ? '#f0d9b5' : '#b58863';
+          const isSelected = selected === sq;
+          const isTarget = legalTargets.has(sq);
+          const bg = isSelected ? '#ffeb99' : (isTarget ? '#9fe29f' : baseColor);
           return (
             <div key={sq}
               onClick={() => {
@@ -509,9 +587,11 @@ export default function Room() {
                   makeMoveUci(uci);
                 }
               }}
-              style={{ width:44, height:44, display:'flex', alignItems:'center', justifyContent:'center', background: isLight ? '#f0d9b5' : '#b58863', cursor: 'pointer', fontSize: 24 }}>
+              style={{ width:54, height:54, display:'flex', alignItems:'center', justifyContent:'center', background: bg, cursor: 'pointer', fontSize: 28, boxSizing: 'border-box', border: isSelected ? '2px solid #f39c12' : '1px solid rgba(0,0,0,0.15)' }}>
               {cell ? (
-                <span draggable onDragStart={(e) => e.dataTransfer.setData('text/from', sq)}>{pieceMap[cell]}</span>
+                <div draggable onDragStart={(e) => { e.dataTransfer.setData('text/from', sq); try { e.dataTransfer.setDragImage(e.currentTarget, 16, 16); } catch(e){} }} style={{ cursor: 'grab', userSelect: 'none' }}>
+                  <Piece piece={cell} />
+                </div>
               ) : ''}
             </div>
           );
@@ -615,7 +695,21 @@ export default function Room() {
 
           {state.phase === 'LOBBY' && (
             <div>
-              <button onClick={startBidding} disabled={state.players.length < state.maxPlayers}>Start Bidding</button>
+              {state.startRequestedBy ? (
+                <div style={{ marginBottom: 8, padding: 8, border: '1px solid #ccc', background: '#fff8e6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    {state.startRequestedBy === playerId ? (
+                      <div>You requested bidding — waiting for opponent</div>
+                    ) : (
+                      <div>{(state.players.find(p => p.id === state.startRequestedBy)?.name) || state.startRequestedBy} requested bidding — click <strong>Start Bidding</strong> to confirm</div>
+                    )}
+                  </div>
+                  <div>
+                    <Countdown deadline={state.startConfirmDeadline} onExpire={() => setMessage('Start request expired')} />
+                  </div>
+                </div>
+              ) : null}
+              <button onClick={startBidding} disabled={state.players.length < state.maxPlayers}>{state.startRequestedBy && state.startRequestedBy !== playerId ? 'Confirm Start' : 'Start Bidding'}</button>
             </div>
           )}
 
