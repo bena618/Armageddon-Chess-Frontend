@@ -307,6 +307,25 @@ export default function Room() {
     }
   }
 
+  async function sendRematchVote(agree) {
+    const backendId = getBackendRoomId();
+    if (!backendId) return;
+    try {
+      const res = await fetch(`${BASE}/rooms/${backendId}/rematch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: playerIdRef.current, agree }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data && data.error) || 'Failed to send rematch vote');
+        return;
+      }
+      setMessage(data.rematchStarted ? 'Rematch started' : 'Vote recorded');
+      await fetchState();
+    } catch (e) { setError('Network error'); }
+  }
+
   useEffect(() => {
     if (!queryId || !joined) return;
 
@@ -547,10 +566,14 @@ export default function Room() {
   const [selected, setSelected] = useState(null);
   function Board({fen}){
     const matrix = fen === 'start' ? fenToMatrix('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR') : fenToMatrix(fen);
-    // compute legal targets for the currently selected square
+    const myPid = playerIdRef.current;
+    const myColor = state && state.colors ? state.colors[myPid] : null;
+    const isMyTurnLocal = state && state.clocks && myColor && state.clocks.turn === myColor;
+
+    // compute legal targets for the currently selected square only if it's my turn
     let legalTargets = new Set();
     try {
-      if (selected && ChessJS && localGameRef.current) {
+      if (isMyTurnLocal && selected && ChessJS && localGameRef.current) {
         const g = new ChessJS(localGameRef.current.fen());
         const moves = g.moves({ square: selected, verbose: true }) || [];
         for (const m of moves) legalTargets.add(m.to);
@@ -571,6 +594,8 @@ export default function Room() {
           return (
             <div key={sq}
               onClick={() => {
+                // block selection when it's not my turn
+                if (!isMyTurnLocal) { setMessage('Not your turn'); return; }
                 if (!selected) { setSelected(sq); }
                 else {
                   const uci = `${selected}${sq}`;
@@ -788,6 +813,30 @@ export default function Room() {
                 <strong>PGN:</strong>
                 <div style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{pgn}</div>
               </div>
+
+              {state.phase === 'FINISHED' && (
+                <div style={{ marginTop: 12, padding: 8, border: '1px solid #ddd', background: '#f7fff7' }}>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Result:</strong> {gameOverInfo ? `${gameOverInfo.winnerName || gameOverInfo.winnerId || gameOverInfo.color} (${gameOverInfo.color}) wins` : (state.winnerId ? (state.players.find(p => p.id === state.winnerId)?.name || state.winnerId) : 'Game finished')}
+                  </div>
+                  {state.rematchWindowEnds ? (
+                    <div>
+                      <div style={{ marginBottom: 8 }}>Rematch voting open — ends in <em>{Math.max(0, Math.ceil((state.rematchWindowEnds - Date.now())/1000))}s</em></div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => sendRematchVote(true)} disabled={state.rematchVotes && state.rematchVotes[playerIdRef.current] === true}>Vote Yes</button>
+                        <button onClick={() => sendRematchVote(false)} disabled={state.rematchVotes && state.rematchVotes[playerIdRef.current] === false}>Vote No</button>
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        Votes: {state.players.map(p => `${p.name || p.id}: ${state.rematchVotes && typeof state.rematchVotes[p.id] !== 'undefined' ? (state.rematchVotes[p.id] ? 'Yes' : 'No') : '—'}`).join(' | ')}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <button onClick={() => sendRematchVote(true)}>Request Rematch</button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>
