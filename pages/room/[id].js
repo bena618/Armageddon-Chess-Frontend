@@ -67,7 +67,16 @@ export default function Room() {
   }, [queryId, router]);
 
   async function autoJoin(playerId, playerName) {
-    const roomId = roomIdRef.current;
+    // Recompute room ID from current URL to avoid race / overwrite
+    const path = typeof window !== 'undefined' ? window.location.pathname : null;
+    const parts = path ? path.split('/').filter(Boolean) : [];
+    const pathRoomId = parts[1] || null;
+    const roomId = pathRoomId || roomIdRef.current;
+    if (!roomId) {
+      setError('No room ID available');
+      return;
+    }
+    if (roomId !== roomIdRef.current) console.warn('join: URL roomId disagrees with locked roomId:', { pathRoomId, locked: roomIdRef.current });
     if (!roomId) {
       setError('No room ID available');
       return;
@@ -83,6 +92,7 @@ export default function Room() {
         body: JSON.stringify({ playerId, name: playerName }),
       });
 
+      console.log('autoJoin POST /rooms/%s/join ->', roomId, res.status);
       console.log('Join response status:', res.status);
 
       if (!res.ok) {

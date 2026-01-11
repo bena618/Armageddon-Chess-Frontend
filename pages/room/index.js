@@ -34,8 +34,12 @@ export default function RoomIndex() {
   }, [id]);
 
   async function autoJoin(playerId, playerName) {
+    // ensure we use the current URL-derived id (defensive)
+    const parts = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean) : [];
+    const pathId = parts[1] || id;
     try {
-      const res = await fetch(`${BASE}/rooms/${id}/join`, {
+      console.log('RoomIndex autoJoin -> joining', pathId, playerId, playerName);
+      const res = await fetch(`${BASE}/rooms/${pathId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
