@@ -19,8 +19,9 @@ export default function Home() {
       const playerId = crypto.randomUUID();
       localStorage.setItem('playerName', name.trim());
       localStorage.setItem('playerId', playerId);
-      // reload so the room page picks up localStorage and auto-joins
-      window.location.reload();
+      // Delay reload so user can inspect/copy console/network logs before the page auto-joins
+      console.log('Reloading to join in 3s — copy console/network logs now if needed');
+      setTimeout(() => window.location.reload(), 3000);
       return;
     }
 
