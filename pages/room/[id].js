@@ -121,7 +121,7 @@ export default function Room() {
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
-      console.log('WebSocket connected to room:', roomId);
+      console.log('WebSocket connected to room:', backendId);
       fetchState(); // Force immediate state refresh when WS connects
     };
 
