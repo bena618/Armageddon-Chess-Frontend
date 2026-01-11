@@ -207,6 +207,19 @@ export default function Room() {
     setMessage('Link copied!');
   }
 
+  async function join() {
+    if (!name.trim()) return;
+
+    setLoading(true);
+    const playerId = crypto.randomUUID();
+    playerIdRef.current = playerId;
+
+    localStorage.setItem('playerName', name.trim());
+    localStorage.setItem('playerId', playerId);
+
+    await autoJoin(playerId, name.trim());
+  }
+
   async function startBidding() {
     try {
       const res = await fetch(`${BASE}/rooms/${id}/start-bidding`, { method: 'POST' });
