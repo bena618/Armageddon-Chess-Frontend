@@ -13,6 +13,11 @@ export default function Home() {
       alert('Please enter your name');
       return;
     }
+    // Defensive: if we're already on a room URL, don't create a new room
+    if (typeof window !== 'undefined' && window.location && window.location.pathname && window.location.pathname.startsWith('/room/')) {
+      console.warn('Create aborted: already on a /room/ URL', window.location.pathname);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -52,6 +57,43 @@ export default function Home() {
     }
   }
 
+  async function quickMatch() {
+    if (!name.trim()) {
+      alert('Please enter your name');
+      return;
+    }
+    setLoading(true);
+    try {
+      const playerId = crypto.randomUUID();
+      const res = await fetch(`${BASE}/rooms/join-next`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId, name: name.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert('No available games: ' + (err.error || res.status));
+        setLoading(false);
+        return;
+      }
+      const data = await res.json();
+      const room = data.room || data;
+      if (!room || !room.roomId) {
+        alert('No room returned from quick match');
+        setLoading(false);
+        return;
+      }
+      localStorage.setItem('playerName', name.trim());
+      localStorage.setItem('playerId', playerId);
+      router.push(`/room/${room.roomId}`);
+    } catch (e) {
+      console.error(e);
+      alert('Network error joining quick match');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main className="container">
       <h1>Armageddon Chess</h1>
@@ -64,6 +106,9 @@ export default function Home() {
       <div className="actions">
         <button onClick={create} disabled={loading || !name.trim()}>
           {loading ? 'Creating...' : 'Play'}
+        </button>
+        <button onClick={quickMatch} disabled={loading || !name.trim()} style={{ marginLeft: 8 }}>
+          {loading ? 'Joining...' : 'Quick Match'}
         </button>
       </div>
     </main>

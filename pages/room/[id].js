@@ -54,6 +54,22 @@ export default function Room() {
       return;
     }
 
+    // Validate the room exists (redirect to landing if not)
+    (async () => {
+      try {
+        const res = await fetch(`${BASE}/rooms/${roomId}`);
+        if (!res.ok) {
+          if (res.status === 404) {
+            console.warn('Room not found on initial load, redirecting to landing:', roomId);
+            router.replace('/');
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('Error validating room on load', e);
+      }
+    })();
+
     const savedName = localStorage.getItem('playerName');
     const savedPlayerId = localStorage.getItem('playerId');
 
@@ -93,10 +109,15 @@ export default function Room() {
       });
 
       console.log('autoJoin POST /rooms/%s/join ->', roomId, res.status);
-      console.log('Join response status:', res.status);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
+        // If the room doesn't exist or joining is disallowed, redirect to landing
+        if (res.status === 404 || err.error === 'not_in_lobby' || err.error === 'room_full') {
+          console.warn('autoJoin failed - redirecting to landing', { status: res.status, error: err.error });
+          router.replace('/');
+          return;
+        }
         setError(err.error || 'Failed to join');
         return;
       }
