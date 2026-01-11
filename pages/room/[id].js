@@ -11,6 +11,7 @@ export default function Room() {
   const [state, setState] = useState(null);
   const [name, setName] = useState('');
   const [joined, setJoined] = useState(false);
+  const [joining, setJoining] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [bidMinutes, setBidMinutes] = useState('0');
@@ -30,9 +31,14 @@ export default function Room() {
   useEffect(() => {
     if (typeof window === 'undefined' || !queryId) return;
 
-    // Lock the room ID on first valid query
+    // Lock the room ID on first valid mount
     if (!lockedRoomIdRef.current) {
       lockedRoomIdRef.current = queryId;
+    }
+
+    // Safety guard: if queryId drifts from locked value, force URL back immediately (shallow)
+    if (lockedRoomIdRef.current && queryId !== lockedRoomIdRef.current) {
+      router.replace(`/room/${lockedRoomIdRef.current}`, undefined, { shallow: true });
     }
 
     const savedName = localStorage.getItem('playerName');
@@ -45,15 +51,16 @@ export default function Room() {
     } else {
       setLoading(false);
     }
-  }, [queryId]);
+  }, [queryId, router]);
 
   async function autoJoin(playerId, playerName) {
-    const targetId = lockedRoomIdRef.current || queryId;
+    const targetId = lockedRoomIdRef.current;
     if (!targetId) {
       setError('No room ID available');
       return;
     }
 
+    setJoining(true);
     try {
       const res = await fetch(`${BASE}/rooms/${targetId}/join`, {
         method: 'POST',
@@ -64,22 +71,26 @@ export default function Room() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
         setError(err.error || 'Failed to join');
-        setLoading(false);
         return;
       }
 
+      localStorage.setItem('playerName', playerName);
+      localStorage.setItem('playerId', playerId);
+
+      playerIdRef.current = playerId;
       setJoined(true);
       setupWebSocket();
       await fetchState();
     } catch (e) {
       setError('Network error joining room');
     } finally {
+      setJoining(false);
       setLoading(false);
     }
   }
 
   function setupWebSocket() {
-    const targetId = lockedRoomIdRef.current || queryId;
+    const targetId = lockedRoomIdRef.current;
     if (!targetId || !playerIdRef.current) return;
 
     const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${targetId}/ws?playerId=${playerIdRef.current}`;
@@ -159,7 +170,7 @@ export default function Room() {
   }
 
   async function fetchState() {
-    const targetId = lockedRoomIdRef.current || queryId;
+    const targetId = lockedRoomIdRef.current;
     if (!targetId) return;
 
     try {
@@ -219,18 +230,15 @@ export default function Room() {
   async function join() {
     if (!name.trim()) return;
 
-    setLoading(true);
+    setJoining(true);
     const playerId = crypto.randomUUID();
     playerIdRef.current = playerId;
-
-    localStorage.setItem('playerName', name.trim());
-    localStorage.setItem('playerId', playerId);
 
     await autoJoin(playerId, name.trim());
   }
 
   async function startBidding() {
-    const targetId = lockedRoomIdRef.current || queryId;
+    const targetId = lockedRoomIdRef.current;
     try {
       const res = await fetch(`${BASE}/rooms/${targetId}/start-bidding`, { method: 'POST' });
       if (!res.ok) {
@@ -250,7 +258,7 @@ export default function Room() {
     if (!Number.isFinite(secs) || secs < 0 || secs > 59) { setError('Seconds must be between 0 and 59'); return; }
     const ms = Math.floor(mins * 60 * 1000 + secs * 1000);
     if (state && typeof state.mainTimeMs === 'number' && ms > state.mainTimeMs) { setError('Bid cannot exceed game main time'); return; }
-    const targetId = lockedRoomIdRef.current || queryId;
+    const targetId = lockedRoomIdRef.current;
     try {
       const res = await fetch(`${BASE}/rooms/${targetId}/submit-bid`, {
         method: 'POST',
@@ -270,7 +278,7 @@ export default function Room() {
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return; }
-    const targetId = lockedRoomIdRef.current || queryId;
+    const targetId = lockedRoomIdRef.current;
     try {
       const res = await fetch(`${BASE}/rooms/${targetId}/choose-color`, {
         method: 'POST',
@@ -327,7 +335,7 @@ export default function Room() {
       setGameOverInfo({ winnerId, winnerName, color: winnerColor });
     }
 
-    const targetId = lockedRoomIdRef.current || queryId;
+    const targetId = lockedRoomIdRef.current;
     try {
       const res = await fetch(`${BASE}/rooms/${targetId}/move`, {
         method: 'POST',
@@ -420,8 +428,8 @@ export default function Room() {
     return <div className="container">Loading room...</div>;
   }
 
-  if (loading && !joined) {
-    return <div className="container">Joining room...</div>;
+  if (loading || joining) {
+    return <div className="container">{joining ? 'Joining room...' : 'Loading...'}</div>;
   }
 
   const playerId = playerIdRef.current;
@@ -431,7 +439,7 @@ export default function Room() {
 
   return (
     <main className="container">
-      <h2>Room {queryId}</h2>
+      <h2>Room {lockedRoomIdRef.current || queryId}</h2>
 
       <div className="share">
         <input readOnly value={typeof window !== 'undefined' ? window.location.href.split('?')[0] : ''} />
@@ -470,10 +478,10 @@ export default function Room() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && join()}
-            disabled={loading}
+            disabled={joining}
           />
-          <button onClick={join} disabled={loading || !name.trim()}>
-            {loading ? 'Joining...' : 'Join'}
+          <button onClick={join} disabled={joining || !name.trim()}>
+            {joining ? 'Joining...' : 'Join'}
           </button>
           {error && <p style={{ color: 'red' }}>{error}</p>}
         </div>
