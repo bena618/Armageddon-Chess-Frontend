@@ -67,6 +67,18 @@ export default function Room() {
     }
   }, [queryId]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (ChessJS) return;
+    import('chess.js').then((mod) => {
+      ChessJS = mod.Chess || mod.default || mod;
+      console.log('Chess engine loaded');
+    }).catch((e) => {
+      console.error('Failed to load chess engine', e);
+      setError('Failed to load chess engine');
+    });
+  }, []);
+
   async function autoJoin(playerId, playerName) {
     const roomId = getBackendRoomId();
     if (!roomId) {
@@ -205,10 +217,24 @@ export default function Room() {
     if (room.clocks) {
       const now = Date.now();
       const last = room.clocks.lastTickAt || now;
-      const whiteMs = (room.clocks.whiteRemainingMs || 0) - ((room.clocks.turn === 'white') ? (now - last) : 0);
-      const blackMs = (room.clocks.blackRemainingMs || 0) - ((room.clocks.turn === 'black') ? (now - last) : 0);
-      setLiveWhiteMs(Math.max(0, whiteMs));
-      setLiveBlackMs(Math.max(0, blackMs));
+      const elapsed = Math.max(0, now - last);
+      const whiteMs = (room.clocks.whiteRemainingMs || 0) - ((room.clocks.turn === 'white') ? elapsed : 0);
+      const blackMs = (room.clocks.blackRemainingMs || 0) - ((room.clocks.turn === 'black') ? elapsed : 0);
+      const safeWhite = Math.max(0, whiteMs);
+      const safeBlack = Math.max(0, blackMs);
+      setLiveWhiteMs(safeWhite);
+      setLiveBlackMs(safeBlack);
+
+      // Local timeout detection: update gameOverInfo for immediate UI feedback
+      if (room.phase === 'PLAYING' && !gameOverInfo) {
+        if (safeWhite <= 0 && (!room.winnerId)) {
+          const winner = room.players && room.players.find(p => room.colors && room.colors[p.id] === 'black');
+          setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
+        } else if (safeBlack <= 0 && (!room.winnerId)) {
+          const winner = room.players && room.players.find(p => room.colors && room.colors[p.id] === 'white');
+          setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
+        }
+      }
     }
   }
 
@@ -251,10 +277,24 @@ export default function Room() {
       if (!state || !state.clocks || gameOverInfo) return;
       const now = Date.now();
       const last = state.clocks.lastTickAt || now;
-      const whiteMs = (state.clocks.whiteRemainingMs || 0) - ((state.clocks.turn === 'white') ? (now - last) : 0);
-      const blackMs = (state.clocks.blackRemainingMs || 0) - ((state.clocks.turn === 'black') ? (now - last) : 0);
-      setLiveWhiteMs(Math.max(0, Math.floor(whiteMs)));
-      setLiveBlackMs(Math.max(0, Math.floor(blackMs)));
+      const elapsed = Math.max(0, now - last);
+      const whiteMs = (state.clocks.whiteRemainingMs || 0) - ((state.clocks.turn === 'white') ? elapsed : 0);
+      const blackMs = (state.clocks.blackRemainingMs || 0) - ((state.clocks.turn === 'black') ? elapsed : 0);
+      const safeWhite = Math.max(0, Math.floor(whiteMs));
+      const safeBlack = Math.max(0, Math.floor(blackMs));
+      setLiveWhiteMs(safeWhite);
+      setLiveBlackMs(safeBlack);
+
+      // Local timeout detection while playing
+      if (state.phase === 'PLAYING' && !gameOverInfo) {
+        if (safeWhite <= 0 && (!state.winnerId)) {
+          const winner = state.players && state.players.find(p => state.colors && state.colors[p.id] === 'black');
+          setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
+        } else if (safeBlack <= 0 && (!state.winnerId)) {
+          const winner = state.players && state.players.find(p => state.colors && state.colors[p.id] === 'white');
+          setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
+        }
+      }
     }, 500);
     return () => clearInterval(t);
   }, [state, gameOverInfo]);
