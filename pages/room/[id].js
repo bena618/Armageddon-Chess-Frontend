@@ -225,7 +225,14 @@ export default function Room() {
 
     try {
       const res = await fetch(`${BASE}/rooms/${roomId}`);
-      if (!res.ok) throw new Error('Failed to fetch state');
+      if (!res.ok) {
+        if (res.status === 404) {
+          console.warn('fetchState: room not found, redirecting to landing', roomId);
+          router.replace('/');
+          return;
+        }
+        throw new Error('Failed to fetch state');
+      }
       const data = await res.json();
       const room = data.room || data;
       console.log('Fetched state - Players:', room.players?.length || 0);
@@ -341,6 +348,33 @@ export default function Room() {
         const err = await res.json().catch(() => ({}));
         setError('Failed to choose color: ' + (err.error || res.status));
         return;
+      }
+    } catch (e) { setError('Network error'); }
+  }
+
+  async function sendRematchVote(agree) {
+    const roomId = roomIdRef.current;
+    const playerId = playerIdRef.current;
+    if (!roomId || !playerId) { setError('Missing room or player id'); return; }
+    try {
+      const res = await fetch(`${BASE}/rooms/${roomId}/rematch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId, agree }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError('Failed to submit rematch vote: ' + (err.error || res.status));
+        return;
+      }
+      const data = await res.json();
+      if (data.rematchStarted) {
+        setMessage('Rematch accepted — resetting to bidding');
+        await fetchState();
+      } else {
+        setMessage('Rematch vote recorded');
+        // update local votes if returned
+        if (data.votes) setState(s => ({ ...(s||{}), rematchVotes: data.votes }));
       }
     } catch (e) { setError('Network error'); }
   }
@@ -633,6 +667,15 @@ export default function Room() {
                 <strong>PGN:</strong>
                 <div style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{pgn}</div>
               </div>
+              {state.phase === 'FINISHED' && (
+                <div style={{ marginTop: 12 }}>
+                  <p>Rematch window: {state.rematchWindowEnds ? Math.max(0, Math.ceil((state.rematchWindowEnds - Date.now())/1000)) + 's' : '—'}</p>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => sendRematchVote(true)}>Request Rematch</button>
+                    <button onClick={() => sendRematchVote(false)}>Decline Rematch</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
