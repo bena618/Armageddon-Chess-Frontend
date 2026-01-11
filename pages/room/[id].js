@@ -106,6 +106,7 @@ export default function Room() {
     wsRef.current.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        console.log('WS received:', data.type, 'Players:', data.room?.players?.length || 'unknown');
         if (data.type === 'init' || data.type === 'update') {
           const room = data.room;
           if (!room || !room.roomId || room.roomId !== targetId) {
@@ -183,6 +184,7 @@ export default function Room() {
       if (!res.ok) throw new Error('Failed to fetch state');
       const data = await res.json();
       const room = data.room || data;
+      console.log('Fetched state - Players:', room.players?.length || 0);
       if (!room || !room.roomId || room.roomId !== targetId) {
         setError('Room not found');
         return;
@@ -190,6 +192,7 @@ export default function Room() {
       updateLocalGameAndClocks(room);
       setState(room);
     } catch (e) {
+      console.error('Fetch error:', e);
       setError('Failed to load room state');
     }
   }
@@ -201,7 +204,7 @@ export default function Room() {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
         fetchState();
       }
-    }, 5000);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [queryId, joined]);
