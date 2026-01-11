@@ -24,6 +24,7 @@ export default function Room() {
   const [message, setMessage] = useState(null);
   const [promotionPending, setPromotionPending] = useState(null);
   const playerIdRef = useRef(null);
+  const wsRef = useRef(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -61,6 +62,7 @@ export default function Room() {
       }
 
       setJoined(true);
+      setupWebSocket();
       await fetchState();
     } catch (e) {
       setError('Network error joining room');
@@ -69,17 +71,82 @@ export default function Room() {
     }
   }
 
-  async function join() {
-    if (!name.trim()) return;
+  function setupWebSocket() {
+    if (!id || !playerIdRef.current) return;
 
-    setLoading(true);
-    const playerId = crypto.randomUUID();
-    playerIdRef.current = playerId;
+    const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${id}/ws?playerId=${playerIdRef.current}`;
+    wsRef.current = new WebSocket(wsUrl);
 
-    localStorage.setItem('playerName', name.trim());
-    localStorage.setItem('playerId', playerId);
+    wsRef.current.onopen = () => {
+      console.log('WebSocket connected');
+    };
 
-    await autoJoin(playerId, name.trim());
+    wsRef.current.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'init' || data.type === 'update') {
+          const room = data.room;
+          if (!room || !room.roomId || room.roomId !== id) {
+            setError('Room not found or invalid');
+            return;
+          }
+          setState(room);
+          updateLocalGameAndClocks(room);
+        }
+      } catch (e) {
+        console.error('WS message error:', e);
+      }
+    };
+
+    wsRef.current.onclose = () => {
+      console.log('WebSocket closed');
+    };
+
+    wsRef.current.onerror = (e) => {
+      console.error('WebSocket error:', e);
+      setError('Connection error - trying to reconnect...');
+    };
+  }
+
+  function updateLocalGameAndClocks(room) {
+    if (ChessJS) {
+      const game = new ChessJS();
+      try {
+        if (room.moves && room.moves.length > 0) {
+          for (const m of room.moves) {
+            try {
+              if (typeof m.move === 'string' && m.move.length >= 4) {
+                const from = m.move.slice(0,2);
+                const to = m.move.slice(2,4);
+                const promotion = m.move.length >= 5 ? m.move[4] : undefined;
+                if (promotion) game.move({ from, to, promotion });
+                else game.move({ from, to });
+              } else {
+                game.move(m.move);
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+      localGameRef.current = game;
+      setBoardFen(game.fen());
+      setPgn(game.pgn());
+
+      if (room.phase === 'FINISHED' && room.winnerId) {
+        const winner = room.players.find(p => p.id === room.winnerId);
+        const color = room.colors ? room.colors[room.winnerId] : null;
+        setGameOverInfo({ winnerId: room.winnerId, winnerName: winner ? winner.name : null, color });
+      }
+    }
+
+    if (room.clocks) {
+      const now = Date.now();
+      const last = room.clocks.lastTickAt || now;
+      const whiteMs = (room.clocks.whiteRemainingMs || 0) - ((room.clocks.turn === 'white') ? (now - last) : 0);
+      const blackMs = (room.clocks.blackRemainingMs || 0) - ((room.clocks.turn === 'black') ? (now - last) : 0);
+      setLiveWhiteMs(Math.max(0, whiteMs));
+      setLiveBlackMs(Math.max(0, blackMs));
+    }
   }
 
   async function fetchState() {
@@ -88,46 +155,12 @@ export default function Room() {
       if (!res.ok) throw new Error('Failed to fetch state');
       const data = await res.json();
       const room = data.room || data;
+      if (!room || !room.roomId || room.roomId !== id) {
+        setError('Room not found');
+        return;
+      }
+      updateLocalGameAndClocks(room);
       setState(room);
-
-      if (ChessJS) {
-        const game = new ChessJS();
-        try {
-          if (room.moves && room.moves.length > 0) {
-            for (const m of room.moves) {
-              try {
-                if (typeof m.move === 'string' && m.move.length >= 4) {
-                  const from = m.move.slice(0,2);
-                  const to = m.move.slice(2,4);
-                  const promotion = m.move.length >= 5 ? m.move[4] : undefined;
-                  if (promotion) game.move({ from, to, promotion });
-                  else game.move({ from, to });
-                } else {
-                  game.move(m.move);
-                }
-              } catch (e) {}
-            }
-          }
-        } catch (e) {}
-        localGameRef.current = game;
-        setBoardFen(game.fen());
-        setPgn(game.pgn());
-
-        if (room.phase === 'FINISHED' && room.winnerId) {
-          const winner = room.players.find(p => p.id === room.winnerId);
-          const color = room.colors ? room.colors[room.winnerId] : null;
-          setGameOverInfo({ winnerId: room.winnerId, winnerName: winner ? winner.name : null, color });
-        }
-      }
-
-      if (room.clocks) {
-        const now = Date.now();
-        const last = room.clocks.lastTickAt || now;
-        const whiteMs = (room.clocks.whiteRemainingMs || 0) - ((room.clocks.turn === 'white') ? (now - last) : 0);
-        const blackMs = (room.clocks.blackRemainingMs || 0) - ((room.clocks.turn === 'black') ? (now - last) : 0);
-        setLiveWhiteMs(Math.max(0, whiteMs));
-        setLiveBlackMs(Math.max(0, blackMs));
-      }
     } catch (e) {
       setError('Failed to load room state');
     }
@@ -136,26 +169,35 @@ export default function Room() {
   useEffect(() => {
     if (!id || !joined) return;
 
-    const interval = setInterval(fetchState, 2000);
-    fetchState();
+    const interval = setInterval(() => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        fetchState();
+      }
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [id, joined]);
 
   useEffect(() => {
     const t = setInterval(() => {
-      if (!state || !state.clocks) return;
+      if (!state || !state.clocks || gameOverInfo) return;
       const now = Date.now();
       const last = state.clocks.lastTickAt || now;
       const whiteMs = (state.clocks.whiteRemainingMs || 0) - ((state.clocks.turn === 'white') ? (now - last) : 0);
       const blackMs = (state.clocks.blackRemainingMs || 0) - ((state.clocks.turn === 'black') ? (now - last) : 0);
-
-      if (gameOverInfo) return;
       setLiveWhiteMs(Math.max(0, Math.floor(whiteMs)));
       setLiveBlackMs(Math.max(0, Math.floor(blackMs)));
     }, 500);
     return () => clearInterval(t);
-  }, [state]);
+  }, [state, gameOverInfo]);
+
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
 
   function copyLink() {
     navigator.clipboard.writeText(window.location.href.replace(/\?.*/, ''));
@@ -170,7 +212,6 @@ export default function Room() {
         setError('Failed to start bidding: ' + (err.error || res.status));
         return;
       }
-      await fetchState();
     } catch (e) { setError('Network error'); }
   }
 
@@ -196,7 +237,6 @@ export default function Room() {
       }
       setBidMinutes('0');
       setBidSeconds('0');
-      await fetchState();
     } catch (e) { setError('Network error'); }
   }
 
@@ -214,7 +254,6 @@ export default function Room() {
         setError('Failed to choose color: ' + (err.error || res.status));
         return;
       }
-      await fetchState();
     } catch (e) { setError('Network error'); }
   }
 
@@ -267,14 +306,15 @@ export default function Room() {
         body: JSON.stringify({ playerId, move: finalUci }),
       });
       if (!res.ok) {
-        await fetchState();
         const err = await res.json().catch(() => ({}));
         setError('Move rejected: ' + (err.error || res.status));
         return false;
       }
-      await fetchState();
       return true;
-    } catch (e) { await fetchState(); setError('Network error'); return false; }
+    } catch (e) {
+      setError('Network error');
+      return false;
+    }
   }
 
   const pieceMap = {
@@ -501,7 +541,6 @@ export default function Room() {
               </div>
             </div>
           )}
-
         </section>
       )}
     </main>
