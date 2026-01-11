@@ -32,14 +32,16 @@ export default function Room() {
     const path = window.location.pathname;
     const parts = path.split('/').filter(Boolean);
     const pathId = parts[1];
-    return pathId || queryId || null;
+    const idToUse = pathId || queryId;
+    console.log('Resolved room ID:', idToUse);
+    return idToUse;
   };
 
   useEffect(() => {
     if (typeof window === 'undefined' || !queryId) return;
 
-    const currentId = getRoomId();
-    if (!currentId) {
+    const roomId = getRoomId();
+    if (!roomId) {
       setError('Invalid room URL');
       return;
     }
@@ -63,6 +65,8 @@ export default function Room() {
       return;
     }
 
+    console.log('Joining room:', roomId, 'with player:', playerName);
+
     setJoining(true);
     try {
       const res = await fetch(`${BASE}/rooms/${roomId}/join`, {
@@ -70,6 +74,8 @@ export default function Room() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
       });
+
+      console.log('Join response status:', res.status);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
@@ -86,6 +92,7 @@ export default function Room() {
       await fetchState();
     } catch (e) {
       setError('Network error joining room');
+      console.error('Join error:', e);
     } finally {
       setJoining(false);
       setLoading(false);
@@ -99,7 +106,7 @@ export default function Room() {
     const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${roomId}/ws?playerId=${playerIdRef.current}`;
     wsRef.current = new WebSocket(wsUrl);
 
-    wsRef.current.onopen = () => console.log('WebSocket connected');
+    wsRef.current.onopen = () => console.log('WebSocket connected to room:', roomId);
 
     wsRef.current.onmessage = (event) => {
       try {
