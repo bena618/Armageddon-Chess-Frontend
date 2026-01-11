@@ -6,7 +6,7 @@ let ChessJS = null;
 
 export default function Room() {
   const router = useRouter();
-  const { id } = router.query;
+  const { id: queryId } = router.query;
 
   const [state, setState] = useState(null);
   const [name, setName] = useState('');
@@ -25,14 +25,15 @@ export default function Room() {
   const [promotionPending, setPromotionPending] = useState(null);
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
+  const lockedRoomIdRef = useRef(null); // Lock the room ID on first mount
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    import('chess.js').then(mod => { ChessJS = mod.Chess; }).catch(() => { ChessJS = null; });
-  }, []);
+    if (typeof window === 'undefined' || !queryId) return;
 
-  useEffect(() => {
-    if (!id) return;
+    // Lock the room ID on first valid query
+    if (!lockedRoomIdRef.current && queryId) {
+      lockedRoomIdRef.current = queryId;
+    }
 
     const savedName = localStorage.getItem('playerName');
     const savedPlayerId = localStorage.getItem('playerId');
@@ -44,11 +45,17 @@ export default function Room() {
     } else {
       setLoading(false);
     }
-  }, [id]);
+  }, [queryId]);
 
   async function autoJoin(playerId, playerName) {
+    const targetId = lockedRoomIdRef.current || queryId;
+    if (!targetId) {
+      setError('No room ID available');
+      return;
+    }
+
     try {
-      const res = await fetch(`${BASE}/rooms/${id}/join`, {
+      const res = await fetch(`${BASE}/rooms/${targetId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
@@ -72,21 +79,20 @@ export default function Room() {
   }
 
   function setupWebSocket() {
-    if (!id || !playerIdRef.current) return;
+    const targetId = lockedRoomIdRef.current || queryId;
+    if (!targetId || !playerIdRef.current) return;
 
-    const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${id}/ws?playerId=${playerIdRef.current}`;
+    const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${targetId}/ws?playerId=${playerIdRef.current}`;
     wsRef.current = new WebSocket(wsUrl);
 
-    wsRef.current.onopen = () => {
-      console.log('WebSocket connected');
-    };
+    wsRef.current.onopen = () => console.log('WebSocket connected');
 
     wsRef.current.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'init' || data.type === 'update') {
           const room = data.room;
-          if (!room || !room.roomId || room.roomId !== id) {
+          if (!room || !room.roomId || room.roomId !== targetId) {
             setError('Room not found or invalid');
             return;
           }
@@ -153,12 +159,15 @@ export default function Room() {
   }
 
   async function fetchState() {
+    const targetId = lockedRoomIdRef.current || queryId;
+    if (!targetId) return;
+
     try {
-      const res = await fetch(`${BASE}/rooms/${id}`);
+      const res = await fetch(`${BASE}/rooms/${targetId}`);
       if (!res.ok) throw new Error('Failed to fetch state');
       const data = await res.json();
       const room = data.room || data;
-      if (!room || !room.roomId || room.roomId !== id) {
+      if (!room || !room.roomId || room.roomId !== targetId) {
         setError('Room not found');
         return;
       }
@@ -170,7 +179,7 @@ export default function Room() {
   }
 
   useEffect(() => {
-    if (!id || !joined) return;
+    if (!queryId || !joined) return;
 
     const interval = setInterval(() => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -179,7 +188,7 @@ export default function Room() {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [id, joined]);
+  }, [queryId, joined]);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -222,7 +231,7 @@ export default function Room() {
 
   async function startBidding() {
     try {
-      const res = await fetch(`${BASE}/rooms/${id}/start-bidding`, { method: 'POST' });
+      const res = await fetch(`${BASE}/rooms/${queryId}/start-bidding`, { method: 'POST' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setError('Failed to start bidding: ' + (err.error || res.status));
@@ -241,7 +250,7 @@ export default function Room() {
     const ms = Math.floor(mins * 60 * 1000 + secs * 1000);
     if (state && typeof state.mainTimeMs === 'number' && ms > state.mainTimeMs) { setError('Bid cannot exceed game main time'); return; }
     try {
-      const res = await fetch(`${BASE}/rooms/${id}/submit-bid`, {
+      const res = await fetch(`${BASE}/rooms/${queryId}/submit-bid`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, amount: ms }),
@@ -260,7 +269,7 @@ export default function Room() {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return; }
     try {
-      const res = await fetch(`${BASE}/rooms/${id}/choose-color`, {
+      const res = await fetch(`${BASE}/rooms/${queryId}/choose-color`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, color }),
@@ -316,7 +325,7 @@ export default function Room() {
     }
 
     try {
-      const res = await fetch(`${BASE}/rooms/${id}/move`, {
+      const res = await fetch(`${BASE}/rooms/${queryId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, move: finalUci }),
@@ -403,7 +412,7 @@ export default function Room() {
     return parts.join(' ');
   }
 
-  if (!id) {
+  if (!queryId) {
     return <div className="container">Loading room...</div>;
   }
 
@@ -418,7 +427,7 @@ export default function Room() {
 
   return (
     <main className="container">
-      <h2>Room {id}</h2>
+      <h2>Room {queryId}</h2>
 
       <div className="share">
         <input readOnly value={typeof window !== 'undefined' ? window.location.href.split('?')[0] : ''} />
