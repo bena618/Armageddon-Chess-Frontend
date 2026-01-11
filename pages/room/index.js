@@ -6,7 +6,6 @@ const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 function getIdFromPath() {
   if (typeof window === 'undefined') return null;
   const parts = window.location.pathname.split('/').filter(Boolean);
-  // parts[0] should be 'room', parts[1] the id
   return parts[1] || null;
 }
 
