@@ -403,10 +403,26 @@ export default function Room() {
       return false;
     }
 
-    const moved = test.move({ from, to, promotion: promotion || 'q' });
-    if (!moved) return setError('Illegal move');
+    let moved;
+    try {
+      moved = test.move({ from, to, promotion: promotion || 'q' });
+    } catch (e) {
+      console.error('Chess engine rejected move:', e);
+      setError('Illegal move');
+      return false;
+    }
+    if (!moved) {
+      setError('Illegal move');
+      return false;
+    }
 
-    game.move({ from, to, promotion: promotion || 'q' });
+    try {
+      game.move({ from, to, promotion: promotion || 'q' });
+    } catch (e) {
+      console.error('Failed to apply move to local game:', e);
+      setError('Illegal move');
+      return false;
+    }
     localGameRef.current = game;
     setBoardFen(game.fen());
     setPgn(game.pgn());
@@ -549,7 +565,13 @@ export default function Room() {
       {state && state.phase === 'PLAYING' && (
         <div style={{ textAlign: 'center', marginTop: 8 }}>
           {gameOverInfo ? (
-            <strong style={{ fontSize: 18 }}>{gameOverInfo.winnerName || gameOverInfo.winnerId} ({gameOverInfo.color}) wins</strong>
+              (() => {
+                const info = gameOverInfo || {};
+                const nameOrId = info.winnerName || info.winnerId;
+                if (nameOrId) return <strong style={{ fontSize: 18 }}>{nameOrId} ({info.color}) wins</strong>;
+                if (info.color) return <strong style={{ fontSize: 18 }}>{info.color.charAt(0).toUpperCase() + info.color.slice(1)} wins</strong>;
+                return <strong style={{ fontSize: 18 }}>Game over</strong>;
+              })()
           ) : (
             <strong style={{ fontSize: 18, color: isMyTurn ? 'green' : 'darkred' }}>{isMyTurn ? 'YOUR TURN' : 'WAITING FOR OPPONENT'}</strong>
           )}
