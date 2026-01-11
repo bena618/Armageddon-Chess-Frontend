@@ -37,9 +37,10 @@ export default function RoomIndex() {
     // ensure we use the current URL-derived id (defensive)
     const parts = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean) : [];
     const pathId = parts[1] || id;
+    const backendId = pathId && pathId.startsWith('room-') ? pathId : (pathId ? 'room-' + pathId : pathId);
     try {
-      console.log('RoomIndex autoJoin -> joining', pathId, playerId, playerName);
-      const res = await fetch(`${BASE}/rooms/${pathId}/join`, {
+      console.log('RoomIndex autoJoin -> joining', pathId, 'backendId=', backendId, playerId, playerName);
+      const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
@@ -75,7 +76,8 @@ export default function RoomIndex() {
 
   async function fetchState() {
     try {
-      const res = await fetch(`${BASE}/rooms/${id}`);
+      const backendId = id && id.startsWith('room-') ? id : (id ? 'room-' + id : id);
+      const res = await fetch(`${BASE}/rooms/${backendId}`);
       if (!res.ok) throw new Error('Failed to fetch state');
       const data = await res.json();
       setState(data.room || data);
