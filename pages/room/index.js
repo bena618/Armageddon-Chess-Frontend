@@ -19,6 +19,11 @@ export default function RoomIndex() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  function getBackendRoomIdFromDisplay(displayId) {
+    if (!displayId) return null;
+    return displayId.startsWith('room-') ? displayId : 'room-' + displayId;
+  }
+
   useEffect(() => {
     if (!id) return;
 
@@ -37,14 +42,18 @@ export default function RoomIndex() {
     // ensure we use the current URL-derived id (defensive)
     const parts = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean) : [];
     const pathId = parts[1] || id;
-    const backendId = pathId && pathId.startsWith('room-') ? pathId : (pathId ? 'room-' + pathId : pathId);
+    const backendId = getBackendRoomIdFromDisplay(pathId);
     try {
-      console.log('RoomIndex autoJoin -> joining', pathId, 'backendId=', backendId, playerId, playerName);
+      console.log('RoomIndex autoJoin -> POST /rooms/' + backendId + '/join', { playerId, playerName });
       const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
       });
+
+      console.log('Join response status:', res.status);
+      const body = await res.text().catch(() => null);
+      try { console.log('Join response body:', body ? JSON.parse(body) : null); } catch (e) { console.log('Join body (raw):', body); }
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
@@ -54,9 +63,11 @@ export default function RoomIndex() {
       }
 
       setJoined(true);
+      // Immediately fetch state to update UI
       await fetchState();
     } catch (e) {
-      setError('Network error joining room');
+      console.error('autoJoin error', e);
+      setError('Network error joining room: ' + (e && e.message));
     } finally {
       setLoading(false);
     }
@@ -76,13 +87,21 @@ export default function RoomIndex() {
 
   async function fetchState() {
     try {
-      const backendId = id && id.startsWith('room-') ? id : (id ? 'room-' + id : id);
+      const backendId = getBackendRoomIdFromDisplay(id);
+      console.log('GET /rooms/' + backendId);
       const res = await fetch(`${BASE}/rooms/${backendId}`);
-      if (!res.ok) throw new Error('Failed to fetch state');
+      console.log('fetchState status:', res.status);
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => null);
+        console.error('fetchState error body:', errBody);
+        throw new Error('Failed to fetch state: ' + res.status);
+      }
       const data = await res.json();
+      console.log('fetchState body:', data);
       setState(data.room || data);
     } catch (e) {
-      setError('Failed to load room state');
+      console.error('fetchState exception', e);
+      setError('Failed to load room state: ' + (e && e.message));
     }
   }
 

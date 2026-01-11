@@ -1,5 +1,5 @@
 import { useRouter } from 'next/router';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
@@ -7,6 +7,10 @@ export default function Home() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [autoJoinPending, setAutoJoinPending] = useState(false);
+  const [autoJoinCountdown, setAutoJoinCountdown] = useState(0);
+  const autoJoinTimerRef = useRef(null);
+  const autoJoinIntervalRef = useRef(null);
 
   async function create() {
     if (!name.trim()) {
@@ -19,9 +23,23 @@ export default function Home() {
       const playerId = crypto.randomUUID();
       localStorage.setItem('playerName', name.trim());
       localStorage.setItem('playerId', playerId);
-      // Delay reload so user can inspect/copy console/network logs before the page auto-joins
-      console.log('Reloading to join in 3s — copy console/network logs now if needed');
-      setTimeout(() => window.location.reload(), 3000);
+      // Start a visible countdown and allow cancel so user can copy logs
+      const delayMs = 8000;
+      setAutoJoinCountdown(Math.ceil(delayMs / 1000));
+      setAutoJoinPending(true);
+      console.log('Reloading to join in', Math.ceil(delayMs / 1000), 's — copy console/network logs now if needed');
+      autoJoinTimerRef.current = setTimeout(() => {
+        window.location.reload();
+      }, delayMs);
+      autoJoinIntervalRef.current = setInterval(() => {
+        setAutoJoinCountdown((c) => {
+          if (c <= 1) {
+            clearInterval(autoJoinIntervalRef.current);
+            return 0;
+          }
+          return c - 1;
+        });
+      }, 1000);
       return;
     }
 
@@ -104,9 +122,29 @@ export default function Home() {
     }
   }
 
+  function cancelAutoJoin() {
+    if (autoJoinTimerRef.current) {
+      clearTimeout(autoJoinTimerRef.current);
+      autoJoinTimerRef.current = null;
+    }
+    if (autoJoinIntervalRef.current) {
+      clearInterval(autoJoinIntervalRef.current);
+      autoJoinIntervalRef.current = null;
+    }
+    setAutoJoinPending(false);
+    setAutoJoinCountdown(0);
+    console.log('Auto-join cancelled by user');
+  }
+
   return (
     <main className="container">
       <h1>Armageddon Chess</h1>
+      {autoJoinPending && (
+        <div style={{ padding: 12, background: '#fff3cd', border: '1px solid #ffeeba', marginBottom: 12 }}>
+          Reloading to join in <strong>{autoJoinCountdown}s</strong>. Copy console/network logs now if needed.
+          <button onClick={cancelAutoJoin} style={{ marginLeft: 12 }}>Cancel</button>
+        </div>
+      )}
       <input
         placeholder="Your name"
         value={name}
