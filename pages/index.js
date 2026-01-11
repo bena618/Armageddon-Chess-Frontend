@@ -13,9 +13,14 @@ export default function Home() {
       alert('Please enter your name');
       return;
     }
-    // Defensive: if we're already on a room URL, don't create a new room
+    // If we're already on a room URL, auto-join that room instead of creating a new one
     if (typeof window !== 'undefined' && window.location && window.location.pathname && window.location.pathname.startsWith('/room/')) {
-      console.warn('Create aborted: already on a /room/ URL', window.location.pathname);
+      console.log('Auto-join: already on a /room/ URL', window.location.pathname);
+      const playerId = crypto.randomUUID();
+      localStorage.setItem('playerName', name.trim());
+      localStorage.setItem('playerId', playerId);
+      // reload so the room page picks up localStorage and auto-joins
+      window.location.reload();
       return;
     }
 
