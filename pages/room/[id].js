@@ -26,6 +26,8 @@ export default function Room() {
   const [promotionPending, setPromotionPending] = useState(null);
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
+  const shortPollRef = useRef(null);
+  const shortPollTimeoutRef = useRef(null);
 
   const roomIdRef = useRef(null);
 
@@ -123,6 +125,16 @@ export default function Room() {
     wsRef.current.onopen = () => {
       console.log('WebSocket connected to room:', backendId);
       fetchState(); // Force immediate state refresh when WS connects
+      // start short-lived polling in case a recent join/update wasn't broadcast
+      try {
+        if (shortPollRef.current) clearInterval(shortPollRef.current);
+        if (shortPollTimeoutRef.current) clearTimeout(shortPollTimeoutRef.current);
+        shortPollRef.current = setInterval(() => fetchState(), 1000);
+        shortPollTimeoutRef.current = setTimeout(() => {
+          if (shortPollRef.current) clearInterval(shortPollRef.current);
+          shortPollRef.current = null;
+        }, 8000);
+      } catch (e) {}
     };
 
     wsRef.current.onmessage = (event) => {
@@ -148,6 +160,9 @@ export default function Room() {
       if (event.code !== 1000) {
         setTimeout(setupWebSocket, 3000);
       }
+      // clear any short polling
+      try { if (shortPollRef.current) clearInterval(shortPollRef.current); shortPollRef.current = null; } catch(e){}
+      try { if (shortPollTimeoutRef.current) clearTimeout(shortPollTimeoutRef.current); shortPollTimeoutRef.current = null; } catch(e){}
     };
 
     wsRef.current.onerror = (e) => {
