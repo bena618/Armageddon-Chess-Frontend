@@ -39,9 +39,6 @@ export default function Room() {
       router.replace(`/room/${lockedRoomIdRef.current}`, undefined, { shallow: true });
     }
 
-    const justCreated = localStorage.getItem('justCreatedRoom') === 'true';
-    localStorage.removeItem('justCreatedRoom');
-
     const savedName = localStorage.getItem('playerName');
     const savedPlayerId = localStorage.getItem('playerId');
 
@@ -49,12 +46,8 @@ export default function Room() {
       setName(savedName);
       playerIdRef.current = savedPlayerId;
       autoJoin(savedPlayerId, savedName);
-    } else if (justCreated) {
-      setLoading(false);
     } else {
-      const tempPlayerId = crypto.randomUUID();
-      const tempName = 'Guest-' + tempPlayerId.slice(0, 8);
-      autoJoin(tempPlayerId, tempName);
+      setLoading(false); // Always show form for shared links if no saved player
     }
   }, [queryId, router]);
 
