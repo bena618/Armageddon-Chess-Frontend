@@ -21,9 +21,39 @@ export default function Home() {
     if (typeof window !== 'undefined' && window.location && window.location.pathname && window.location.pathname.startsWith('/room/')) {
       console.log('Auto-join: already on a /room/ URL', window.location.pathname);
       const playerId = crypto.randomUUID();
-      localStorage.setItem('playerName', name.trim());
-      localStorage.setItem('playerId', playerId);
-      // Start a visible countdown and allow cancel so user can copy logs
+      const displayId = window.location.pathname.split('/').filter(Boolean)[1];
+      const backendId = (displayId && displayId.startsWith('room-')) ? displayId : (displayId ? 'room-' + displayId : null);
+      if (!backendId) {
+        alert('Invalid room URL');
+        return;
+      }
+
+      // Try to join the backend directly without a full reload so the room UI updates immediately
+      try {
+        console.log('Attempting direct join POST /rooms/' + backendId + '/join');
+        const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId, name: name.trim() }),
+        });
+        const body = await res.text().catch(() => null);
+        console.log('Direct join status:', res.status, 'body:', body);
+        if (!res.ok) {
+          const err = (body && (() => { try { return JSON.parse(body); } catch(e){ return { error: body }; } })()) || { error: 'unknown' };
+          alert('Failed to join room: ' + (err.error || res.status));
+          // fallback to delayed reload (so user can copy logs)
+        } else {
+          localStorage.setItem('playerName', name.trim());
+          localStorage.setItem('playerId', playerId);
+          // navigate to same path with query to force remount
+          router.replace(window.location.pathname + '?_joined=' + Date.now());
+          return;
+        }
+      } catch (e) {
+        console.error('Direct join error', e);
+      }
+
+      // Start a visible countdown and allow cancel so user can copy logs (fallback)
       const delayMs = 8000;
       setAutoJoinCountdown(Math.ceil(delayMs / 1000));
       setAutoJoinPending(true);
