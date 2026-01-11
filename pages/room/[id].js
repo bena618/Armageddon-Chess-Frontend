@@ -100,11 +100,9 @@ export default function Room() {
 
     wsRef.current.onclose = (event) => {
       console.log('WebSocket closed:', event.code, event.reason);
-      if (event.code !== 1000) {  // Not normal close
-        setTimeout(setupWebSocket, 3000);  // Reconnect after 3s
+      if (event.code !== 1000) {
+        setTimeout(setupWebSocket, 3000);
       }
-    };
-      
     };
 
     wsRef.current.onerror = (e) => {
@@ -392,8 +390,13 @@ export default function Room() {
     return parts.join(' ');
   }
 
-  if (!id) return <div className="container">Loading room...</div>;
-  if (loading && !joined) return <div className="container">Joining room...</div>;
+  if (!id) {
+    return <div className="container">Loading room...</div>;
+  }
+
+  if (loading && !joined) {
+    return <div className="container">Joining room...</div>;
+  }
 
   const playerId = playerIdRef.current;
   const amIWinner = state && state.winnerId && playerId === state.winnerId;
