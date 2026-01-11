@@ -27,25 +27,18 @@ export default function Room() {
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
 
-  const roomIdRef = useRef(null); // Single source of truth for room ID
+  const roomIdRef = useRef(null);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !queryId) return;
 
-    // Capture the REAL URL path on first load
     const path = window.location.pathname;
     const parts = path.split('/').filter(Boolean);
     const pathId = parts[1];
 
     if (!roomIdRef.current) {
-      roomIdRef.current = pathId || queryId;
+      roomIdRef.current = pathId;
       console.log('Locked room ID from path:', roomIdRef.current);
-
-      // Safety: force URL to match the locked ID (prevents Next.js drift)
-      if (pathId && queryId && pathId !== queryId) {
-        console.log('Drift detected! Forcing URL back to:', pathId);
-        router.replace(`/room/${pathId}`, undefined, { shallow: true, scroll: false });
-      }
     }
 
     const roomId = roomIdRef.current;
@@ -53,22 +46,6 @@ export default function Room() {
       setError('Invalid room URL');
       return;
     }
-
-    // Validate the room exists (redirect to landing if not)
-    (async () => {
-      try {
-        const res = await fetch(`${BASE}/rooms/${roomId}`);
-        if (!res.ok) {
-          if (res.status === 404) {
-            console.warn('Room not found on initial load, redirecting to landing:', roomId);
-            router.replace('/');
-            return;
-          }
-        }
-      } catch (e) {
-        console.error('Error validating room on load', e);
-      }
-    })();
 
     const savedName = localStorage.getItem('playerName');
     const savedPlayerId = localStorage.getItem('playerId');
@@ -80,21 +57,12 @@ export default function Room() {
     } else {
       setLoading(false);
     }
-  }, [queryId, router]);
+  }, [queryId]);
 
   async function autoJoin(playerId, playerName) {
-    // Recompute room ID from current URL to avoid race / overwrite
-    const path = typeof window !== 'undefined' ? window.location.pathname : null;
-    const parts = path ? path.split('/').filter(Boolean) : [];
-    const pathRoomId = parts[1] || null;
-    const roomId = pathRoomId || roomIdRef.current;
+    const roomId = roomIdRef.current;
     if (!roomId) {
-      setError('No room ID available');
-      return;
-    }
-    if (roomId !== roomIdRef.current) console.warn('join: URL roomId disagrees with locked roomId:', { pathRoomId, locked: roomIdRef.current });
-    if (!roomId) {
-      setError('No room ID available');
+      setError('No room ID in URL');
       return;
     }
 
@@ -108,16 +76,10 @@ export default function Room() {
         body: JSON.stringify({ playerId, name: playerName }),
       });
 
-      console.log('autoJoin POST /rooms/%s/join ->', roomId, res.status);
+      console.log('Join response status:', res.status);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
-        // If the room doesn't exist or joining is disallowed, redirect to landing
-        if (res.status === 404 || err.error === 'not_in_lobby' || err.error === 'room_full') {
-          console.warn('autoJoin failed - redirecting to landing', { status: res.status, error: err.error });
-          router.replace('/');
-          return;
-        }
         setError(err.error || 'Failed to join');
         return;
       }
@@ -127,8 +89,13 @@ export default function Room() {
 
       playerIdRef.current = playerId;
       setJoined(true);
-      setupWebSocket();
-      await fetchState();
+
+      // Delay WebSocket connection to allow backend to broadcast update
+      setTimeout(() => {
+        setupWebSocket();
+      }, 2000);
+
+      await fetchState(); // Immediate state refresh after successful join
     } catch (e) {
       setError('Network error joining room');
       console.error('Join error:', e);
@@ -143,9 +110,14 @@ export default function Room() {
     if (!roomId || !playerIdRef.current) return;
 
     const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${roomId}/ws?playerId=${playerIdRef.current}`;
+    console.log('Connecting WS to:', wsUrl);
+
     wsRef.current = new WebSocket(wsUrl);
 
-    wsRef.current.onopen = () => console.log('WebSocket connected to room:', roomId);
+    wsRef.current.onopen = () => {
+      console.log('WebSocket connected to room:', roomId);
+      fetchState(); // Force immediate state refresh when WS connects
+    };
 
     wsRef.current.onmessage = (event) => {
       try {
@@ -225,14 +197,7 @@ export default function Room() {
 
     try {
       const res = await fetch(`${BASE}/rooms/${roomId}`);
-      if (!res.ok) {
-        if (res.status === 404) {
-          console.warn('fetchState: room not found, redirecting to landing', roomId);
-          router.replace('/');
-          return;
-        }
-        throw new Error('Failed to fetch state');
-      }
+      if (!res.ok) throw new Error('Failed to fetch state');
       const data = await res.json();
       const room = data.room || data;
       console.log('Fetched state - Players:', room.players?.length || 0);
@@ -255,7 +220,7 @@ export default function Room() {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
         fetchState();
       }
-    }, 2000);
+    }, 1000); // 1-second polling for faster testing/debugging
 
     return () => clearInterval(interval);
   }, [queryId, joined]);
@@ -348,33 +313,6 @@ export default function Room() {
         const err = await res.json().catch(() => ({}));
         setError('Failed to choose color: ' + (err.error || res.status));
         return;
-      }
-    } catch (e) { setError('Network error'); }
-  }
-
-  async function sendRematchVote(agree) {
-    const roomId = roomIdRef.current;
-    const playerId = playerIdRef.current;
-    if (!roomId || !playerId) { setError('Missing room or player id'); return; }
-    try {
-      const res = await fetch(`${BASE}/rooms/${roomId}/rematch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, agree }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setError('Failed to submit rematch vote: ' + (err.error || res.status));
-        return;
-      }
-      const data = await res.json();
-      if (data.rematchStarted) {
-        setMessage('Rematch accepted — resetting to bidding');
-        await fetchState();
-      } else {
-        setMessage('Rematch vote recorded');
-        // update local votes if returned
-        if (data.votes) setState(s => ({ ...(s||{}), rematchVotes: data.votes }));
       }
     } catch (e) { setError('Network error'); }
   }
@@ -667,15 +605,6 @@ export default function Room() {
                 <strong>PGN:</strong>
                 <div style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{pgn}</div>
               </div>
-              {state.phase === 'FINISHED' && (
-                <div style={{ marginTop: 12 }}>
-                  <p>Rematch window: {state.rematchWindowEnds ? Math.max(0, Math.ceil((state.rematchWindowEnds - Date.now())/1000)) + 's' : '—'}</p>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => sendRematchVote(true)}>Request Rematch</button>
-                    <button onClick={() => sendRematchVote(false)}>Decline Rematch</button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </section>
