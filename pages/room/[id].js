@@ -29,6 +29,12 @@ export default function Room() {
 
   const roomIdRef = useRef(null);
 
+  // display ID (from URL) is stored in roomIdRef; backend expects full id prefixed with 'room-'
+  const getBackendRoomId = () => {
+    const rid = roomIdRef.current || queryId || '';
+    return rid.startsWith('room-') ? rid : 'room-' + rid;
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined' || !queryId) return;
 
@@ -60,7 +66,7 @@ export default function Room() {
   }, [queryId]);
 
   async function autoJoin(playerId, playerName) {
-    const roomId = roomIdRef.current;
+    const roomId = getBackendRoomId();
     if (!roomId) {
       setError('No room ID in URL');
       return;
@@ -106,10 +112,10 @@ export default function Room() {
   }
 
   function setupWebSocket() {
-    const roomId = roomIdRef.current;
-    if (!roomId || !playerIdRef.current) return;
+    const backendId = getBackendRoomId();
+    if (!backendId || !playerIdRef.current) return;
 
-    const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${roomId}/ws?playerId=${playerIdRef.current}`;
+    const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${backendId}/ws?playerId=${playerIdRef.current}`;
     console.log('Connecting WS to:', wsUrl);
 
     wsRef.current = new WebSocket(wsUrl);
@@ -125,7 +131,7 @@ export default function Room() {
         console.log('WS received:', data.type, 'Players:', data.room?.players?.length || 'unknown');
         if (data.type === 'init' || data.type === 'update') {
           const room = data.room;
-          if (!room || !room.roomId || room.roomId !== roomId) {
+          if (!room || !room.roomId || room.roomId !== backendId) {
             setError('Room not found or invalid');
             return;
           }
@@ -192,16 +198,16 @@ export default function Room() {
   }
 
   async function fetchState() {
-    const roomId = roomIdRef.current;
-    if (!roomId) return;
+    const backendId = getBackendRoomId();
+    if (!backendId) return;
 
     try {
-      const res = await fetch(`${BASE}/rooms/${roomId}`);
+      const res = await fetch(`${BASE}/rooms/${backendId}`);
       if (!res.ok) throw new Error('Failed to fetch state');
       const data = await res.json();
       const room = data.room || data;
       console.log('Fetched state - Players:', room.players?.length || 0);
-      if (!room || !room.roomId || room.roomId !== roomId) {
+      if (!room || !room.roomId || room.roomId !== backendId) {
         setError('Room not found');
         return;
       }
@@ -262,9 +268,9 @@ export default function Room() {
   }
 
   async function startBidding() {
-    const roomId = roomIdRef.current;
+    const backendId = getBackendRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${roomId}/start-bidding`, { method: 'POST' });
+      const res = await fetch(`${BASE}/rooms/${backendId}/start-bidding`, { method: 'POST' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setError('Failed to start bidding: ' + (err.error || res.status));
@@ -282,9 +288,9 @@ export default function Room() {
     if (!Number.isFinite(secs) || secs < 0 || secs > 59) { setError('Seconds must be between 0 and 59'); return; }
     const ms = Math.floor(mins * 60 * 1000 + secs * 1000);
     if (state && typeof state.mainTimeMs === 'number' && ms > state.mainTimeMs) { setError('Bid cannot exceed game main time'); return; }
-    const roomId = roomIdRef.current;
+    const backendId = getBackendRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${roomId}/submit-bid`, {
+      const res = await fetch(`${BASE}/rooms/${backendId}/submit-bid`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, amount: ms }),
@@ -302,9 +308,9 @@ export default function Room() {
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return; }
-    const roomId = roomIdRef.current;
+    const backendId = getBackendRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${roomId}/choose-color`, {
+      const res = await fetch(`${BASE}/rooms/${backendId}/choose-color`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, color }),
@@ -359,9 +365,9 @@ export default function Room() {
       setGameOverInfo({ winnerId, winnerName, color: winnerColor });
     }
 
-    const roomId = roomIdRef.current;
+    const backendId = getBackendRoomId();
     try {
-      const res = await fetch(`${BASE}/rooms/${roomId}/move`, {
+      const res = await fetch(`${BASE}/rooms/${backendId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, move: finalUci }),

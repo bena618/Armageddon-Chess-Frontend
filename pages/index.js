@@ -48,7 +48,9 @@ export default function Home() {
       localStorage.setItem('playerName', name.trim());
       localStorage.setItem('playerId', playerId);
 
-      router.push(`/room/${roomId}`);
+      // Strip 'room-' prefix for clean URL display
+      const displayId = roomId.replace(/^room-/, '');
+      router.push(`/room/${displayId}`);
     } catch (e) {
       console.error(e);
       alert('Network error creating room');
@@ -85,7 +87,9 @@ export default function Home() {
       }
       localStorage.setItem('playerName', name.trim());
       localStorage.setItem('playerId', playerId);
-      router.push(`/room/${room.roomId}`);
+      // Strip 'room-' prefix for clean URL display
+      const displayId = room.roomId.replace(/^room-/, '');
+      router.push(`/room/${displayId}`);
     } catch (e) {
       console.error(e);
       alert('Network error joining quick match');
