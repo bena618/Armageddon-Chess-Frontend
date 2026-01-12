@@ -28,6 +28,7 @@ export default function Room() {
   const wsRef = useRef(null);
   const shortPollRef = useRef(null);
   const shortPollTimeoutRef = useRef(null);
+  const timeForfeitSentRef = useRef(false);
 
   const roomIdRef = useRef(null);
 
@@ -272,14 +273,23 @@ export default function Room() {
       setLiveWhiteMs(safeWhite);
       setLiveBlackMs(safeBlack);
 
-      // Local timeout detection: update gameOverInfo for immediate UI feedback
+      // Local timeout detection: update gameOverInfo for immediate UI feedback and notify server
       if (room.phase === 'PLAYING' && !gameOverInfo) {
         if (safeWhite <= 0 && (!room.winnerId)) {
           const winner = room.players && room.players.find(p => room.colors && room.colors[p.id] === 'black');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
+          // notify server once
+          if (!timeForfeitSentRef.current) {
+            timeForfeitSentRef.current = true;
+            sendTimeForfeit(room.players.find(p => p && p && p.id && (room.colors && room.colors[p.id] === 'white'))?.id || null);
+          }
         } else if (safeBlack <= 0 && (!room.winnerId)) {
           const winner = room.players && room.players.find(p => room.colors && room.colors[p.id] === 'white');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
+          if (!timeForfeitSentRef.current) {
+            timeForfeitSentRef.current = true;
+            sendTimeForfeit(room.players.find(p => p && p && p.id && (room.colors && room.colors[p.id] === 'black'))?.id || null);
+          }
         }
       }
     }
@@ -305,6 +315,24 @@ export default function Room() {
       console.error('Fetch error:', e);
       setError('Failed to load room state');
     }
+  }
+
+  async function sendTimeForfeit(timedOutPlayerId) {
+    const backendId = getBackendRoomId();
+    if (!backendId) return;
+    try {
+      const res = await fetch(`${BASE}/rooms/${backendId}/time-forfeit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timedOutPlayerId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error('Time-forfeit request failed:', err);
+        return;
+      }
+      await fetchState();
+    } catch (e) { console.error('Time-forfeit network error', e); }
   }
 
   async function sendRematchVote(agree) {
