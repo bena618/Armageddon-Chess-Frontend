@@ -39,11 +39,16 @@ export default function Room() {
   };
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !queryId) return;
+    if (typeof window === 'undefined') return;
 
-    const path = window.location.pathname;
-    const parts = path.split('/').filter(Boolean);
-    const pathId = parts[1];
+    // detect /room/<id> from the pathname directly so refresh preserves auto-join
+    const path = window.location.pathname || '';
+    const m = path.match(/^\/room\/([^\/]+)/);
+    if (!m) {
+      setLoading(false);
+      return;
+    }
+    const pathId = m[1];
 
     if (!roomIdRef.current) {
       roomIdRef.current = pathId;
@@ -66,7 +71,7 @@ export default function Room() {
     } else {
       setLoading(false);
     }
-  }, [queryId]);
+  }, []);
 
   function Countdown({ deadline, totalMs, onExpire }) {
     const [secs, setSecs] = useState(() => deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null);
