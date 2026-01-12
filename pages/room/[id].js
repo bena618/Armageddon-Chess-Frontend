@@ -115,6 +115,29 @@ export default function Room() {
     );
   }
 
+  function LiveTimer({ deadline, format = 's', onExpire }) {
+    const [secs, setSecs] = useState(() => deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null);
+    useEffect(() => {
+      if (!deadline) return undefined;
+      const tick = () => {
+        const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        setSecs(s);
+        if (s <= 0 && onExpire) onExpire();
+      };
+      tick();
+      const id = setInterval(tick, 250);
+      return () => clearInterval(id);
+    }, [deadline]);
+
+    if (secs === null) return <span>—</span>;
+    if (format === 'mm:ss') {
+      const mm = Math.floor(secs / 60);
+      const ss = String(secs % 60).padStart(2, '0');
+      return <span>{mm}:{ss}</span>;
+    }
+    return <span>{secs}s</span>;
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (ChessJS) return;
@@ -301,13 +324,25 @@ export default function Room() {
 
     try {
       const res = await fetch(`${BASE}/rooms/${backendId}`);
-      if (!res.ok) throw new Error('Failed to fetch state');
+      if (!res.ok) {
+        if (res.status === 404) {
+          setMessage('Room no longer exists — sending you back to lobby');
+          setTimeout(() => router.replace('/'), 3000);
+          return;
+        }
+        throw new Error('Failed to fetch state');
+      }
       const data = await res.json();
       const room = data.room || data;
       console.log('Fetched state - Players:', room.players?.length || 0);
       if (!room || !room.roomId || room.roomId !== backendId) {
         setError('Room not found');
         return;
+      }
+      // if server marked room closed due to expired start request, inform user and redirect
+      if (room.closed) {
+        setMessage('Players did not press start — sending you back to lobby');
+        setTimeout(() => router.replace('/'), 5000);
       }
       updateLocalGameAndClocks(room);
       setState(room);
@@ -768,7 +803,7 @@ export default function Room() {
 
           {state.phase === 'BIDDING' && (
             <div>
-              <p>Bid deadline: {state.bidDeadline ? new Date(state.bidDeadline).toLocaleTimeString() : '—'}</p>
+              <p>Bid deadline: {state.bidDeadline ? <><LiveTimer deadline={state.bidDeadline} format="mm:ss" /> ({new Date(state.bidDeadline).toLocaleTimeString()})</> : '—'}</p>
               <p>Existing bids:</p>
               <ul>
                 {state.players.map(p => {
@@ -808,7 +843,7 @@ export default function Room() {
                       <p>Choose color (black receives draw odds):</p>
                       <button onClick={() => chooseColor('white')}>White</button>
                       <button onClick={() => chooseColor('black')}>Black</button>
-                      <p>Time remaining to choose: {state.choiceDeadline ? Math.max(0, Math.ceil((state.choiceDeadline - Date.now())/1000)) + 's' : '—'}</p>
+                      <p>Time remaining to choose: {state.choiceDeadline ? <LiveTimer deadline={state.choiceDeadline} /> : '—'}</p>
                     </div>
                   );
                 }
@@ -849,7 +884,7 @@ export default function Room() {
                   </div>
                   {state.rematchWindowEnds ? (
                     <div>
-                      <div style={{ marginBottom: 8 }}>Rematch voting open — ends in <em>{Math.max(0, Math.ceil((state.rematchWindowEnds - Date.now())/1000))}s</em></div>
+                      <div style={{ marginBottom: 8 }}>Rematch voting open — ends in <em><LiveTimer deadline={state.rematchWindowEnds} /></em></div>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button onClick={() => sendRematchVote(true)} disabled={state.rematchVotes && state.rematchVotes[playerIdRef.current] === true}>Vote Yes</button>
                         <button onClick={() => sendRematchVote(false)} disabled={state.rematchVotes && state.rematchVotes[playerIdRef.current] === false}>Vote No</button>
