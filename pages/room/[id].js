@@ -794,7 +794,7 @@ export default function Room() {
                     )}
                   </div>
                   <div>
-                    <Countdown deadline={state.startConfirmDeadline} onExpire={() => setMessage('Start request expired')} />
+                    <Countdown deadline={state.startConfirmDeadline} totalMs={state.choiceDurationMs} onExpire={() => setMessage('Start request expired')} />
                   </div>
                 </div>
               ) : null}
