@@ -68,7 +68,7 @@ export default function Room() {
     }
   }, [queryId]);
 
-  function Countdown({ deadline, onExpire }) {
+  function Countdown({ deadline, totalMs, onExpire }) {
     const [secs, setSecs] = useState(() => deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null);
     const beepedRef = useRef(false);
     useEffect(() => {
@@ -80,7 +80,6 @@ export default function Room() {
           if (onExpire) onExpire();
         }
         if (s <= 5 && !beepedRef.current) {
-          // play short beep
           try {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             const o = ctx.createOscillator();
@@ -99,16 +98,18 @@ export default function Room() {
         }
       };
       tick();
-      const id = setInterval(tick, 500);
+      const id = setInterval(tick, 250);
       return () => clearInterval(id);
     }, [deadline]);
 
     if (secs === null) return null;
-    const pct = Math.max(0, Math.min(100, Math.round((secs / Math.max(1, Math.ceil((deadline - (Date.now()-secs*1000)) / 1000))) * 100)));
+    const remainingMs = Math.max(0, deadline - Date.now());
+    const total = typeof totalMs === 'number' && totalMs > 0 ? totalMs : null;
+    const pct = total ? Math.max(0, Math.min(100, Math.round((remainingMs / total) * 100))) : 0;
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ width: 120, height: 10, background: '#eee', borderRadius: 6, overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: '#ff8a00', transition: 'width 0.4s linear' }} />
+        <div style={{ width: 140, height: 10, background: '#eee', borderRadius: 6, overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: '#ff8a00', transition: 'width 0.25s linear' }} />
         </div>
         <div style={{ fontSize: 12 }}>{secs}s</div>
       </div>
