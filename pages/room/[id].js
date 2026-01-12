@@ -55,6 +55,7 @@ export default function Room() {
   const shortPollRef = useRef(null);
   const shortPollTimeoutRef = useRef(null);
   const timeForfeitSentRef = useRef(false);
+  const rejoinAttemptedRef = useRef(false);
 
   const roomIdRef = useRef(null);
 
@@ -390,6 +391,20 @@ export default function Room() {
       }
       updateLocalGameAndClocks(room);
       setState(room);
+
+      // If our stored playerId exists locally but server doesn't list us, try a one-time rejoin
+      try {
+        const savedPid = getStoredPlayerId();
+        const listed = savedPid && room.players && room.players.find(p => p.id === savedPid);
+        if (savedPid && !listed && !rejoinAttemptedRef.current) {
+          rejoinAttemptedRef.current = true;
+          const savedName = (typeof window !== 'undefined') ? (localStorage.getItem('playerName') || getCookie('playerName')) : null;
+          console.log('Stored playerId not found on server; attempting background rejoin:', savedPid);
+          await autoJoin(savedPid, savedName || '');
+        }
+      } catch (e) {
+        console.warn('Background rejoin attempt failed', e);
+      }
     } catch (e) {
       console.error('Fetch error:', e);
       setError('Failed to load room state');
