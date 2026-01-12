@@ -771,6 +771,19 @@ export default function Room() {
 
       {joined && state && (
         <section className="state">
+          {typeof window !== 'undefined' && window.location.search.includes('debug=1') ? (
+            <div style={{ padding: 8, marginBottom: 8, border: '1px dashed #888', background: '#f7f7ff' }}>
+              <strong>Debug:</strong>
+              <div>startRequestedBy: {String(state.startRequestedBy || 'null')}</div>
+              <div>startConfirmDeadline: {state.startConfirmDeadline ? new Date(state.startConfirmDeadline).toLocaleString() : 'null'}</div>
+              <div>choiceDurationMs: {String(state.choiceDurationMs || 'null')}</div>
+              <div>closed: {String(!!state.closed)}</div>
+              <div>
+                remainingMs: {state.startConfirmDeadline ? Math.max(0, state.startConfirmDeadline - Date.now()) : '—'}
+                {state.startConfirmDeadline && state.choiceDurationMs ? (' — pct: ' + Math.round(Math.max(0, Math.min(100, ((Math.max(0, state.startConfirmDeadline - Date.now()) / state.choiceDurationMs) * 100))))) + '%' : ''}
+              </div>
+            </div>
+          ) : null}
           <h3>Room State — {state.phase}</h3>
 
           <div>
