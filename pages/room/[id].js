@@ -4,6 +4,32 @@ const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 let ChessJS = null;
 
+  // Helper cookie functions
+  function getCookie(name) {
+    if (typeof document === 'undefined') return null;
+    const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()\[\]\\\/\\+^])/g, '\\$1') + '=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  // setCookie expiry is in hours (pass null/undefined for session cookie)
+  function setCookie(name, value, hours) {
+    if (typeof document === 'undefined') return;
+    const maxAge = (typeof hours === 'number' && hours > 0) ? String(Math.floor(hours * 60 * 60)) : undefined;
+    let cookie = `${name}=${encodeURIComponent(value)}; path=/`;
+    if (maxAge) cookie += `; max-age=${maxAge}`;
+    document.cookie = cookie;
+  }
+
+  function getStoredPlayerId() {
+    if (playerIdRef.current) return playerIdRef.current;
+    if (typeof window !== 'undefined') {
+      const ls = localStorage.getItem('playerId');
+      if (ls) return ls;
+      const c = getCookie('playerId');
+      if (c) return c;
+    }
+    return null;
+  }
+
 export default function Room() {
   const router = useRouter();
   const { id: queryId } = router.query;
@@ -61,8 +87,8 @@ export default function Room() {
       return;
     }
 
-    const savedName = localStorage.getItem('playerName');
-    const savedPlayerId = localStorage.getItem('playerId');
+    const savedName = typeof window !== 'undefined' ? (localStorage.getItem('playerName') || getCookie('playerName')) : null;
+    const savedPlayerId = typeof window !== 'undefined' ? (localStorage.getItem('playerId') || getCookie('playerId')) : null;
 
     if (savedName && savedPlayerId) {
       setName(savedName);
@@ -183,6 +209,9 @@ export default function Room() {
 
       localStorage.setItem('playerName', playerName);
       localStorage.setItem('playerId', playerId);
+      // cookie fallback (5 hours)
+      setCookie('playerName', playerName, 5);
+      setCookie('playerId', playerId, 5);
 
       playerIdRef.current = playerId;
       setJoined(true);
@@ -347,8 +376,17 @@ export default function Room() {
       }
       // if server marked room closed due to expired start request, inform user and redirect
       if (room.closed) {
-        setMessage('Players did not press start — sending you back to lobby');
-        setTimeout(() => router.replace('/'), 5000);
+        // only redirect if this client is NOT still listed as a player in the room
+        const savedPid = getStoredPlayerId();
+        const stillInRoom = savedPid && room.players && room.players.find(p => p.id === savedPid);
+        if (stillInRoom) {
+          // keep the client in the room UI (preserve experience across refresh)
+          setMessage('Start request expired on server, but your player record still present; staying on page.');
+        } else {
+          setMessage('Players did not press start — sending you back to lobby');
+          setTimeout(() => router.replace('/'), 5000);
+          return; // stop further processing
+        }
       }
       updateLocalGameAndClocks(room);
       setState(room);
