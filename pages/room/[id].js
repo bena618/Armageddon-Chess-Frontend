@@ -560,44 +560,6 @@ export default function Room() {
     };
   }, [roomId, joined, startPending, name, state?.startConfirmDeadline, router]);
 
-  // In the LOBBY phase UI - disable button when pending
-  {state.phase === 'LOBBY' && (
-    <div style={{ marginTop: 16 }}>
-      {startPending || state.startRequestedBy ? (
-        <div style={{ padding: 12, background: '#fff3cd', border: '1px solid #ffeeba', borderRadius: 8 }}>
-          <p>
-            {state.startRequestedBy === playerIdRef.current ? (
-              'You requested to start bidding — waiting for opponent to confirm'
-            ) : (
-              `${state.players.find(p => p.id === state.startRequestedBy)?.name || 'Opponent'} requested to start bidding`
-            )}
-          </p>
-          <Countdown 
-            deadline={state.startConfirmDeadline} 
-            totalMs={10000}
-            onExpire={() => {
-              setMessage('Start request timed out — returning to lobby');
-              setStartPending(false);
-              setTimeout(() => router.push('/'), 2000);
-            }}
-          />
-          {state.startRequestedBy !== playerIdRef.current && !startPending && (
-            <button onClick={startBidding}>
-              Confirm Start Bidding
-            </button>
-          )}
-        </div>
-      ) : (
-        <button 
-          onClick={startBidding} 
-          disabled={state.players.length < state.maxPlayers}
-        >
-          Start Bidding
-        </button>
-      )}
-    </div>
-  )}
-
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return; }
@@ -802,22 +764,25 @@ export default function Room() {
     return parts.join(' ');
   }
 
-  if (!state) {
-    return <div className="container">Loading room state...</div>;
+  if (typeof window === 'undefined') {
+      return null;
   }
 
-  if (!queryId) {
+  if (!roomIdRef.current && !roomId) {
     return <div className="container">Loading room...</div>;
   }
 
-  if (loading || joining) {
-    return <div className="container">{joining ? 'Joining room...' : 'Loading...'}</div>;
+  if (loading || joining || !state) {
+    return <div className="container">
+      {joining ? 'Joining room...' : (!state ? 'Loading room state...' : 'Loading...')}
+    </div>;
   }
 
   const playerId = playerIdRef.current;
-  const amIWinner = state && state.winnerId && playerId === state.winnerId;
-  const myColor = state && state.colors ? state.colors[playerId] : null;
-  const isMyTurn = state && state.clocks && myColor && state.clocks.turn === myColor;
+  const amIWinner = state.winnerId && playerId === state.winnerId;
+  const myColor = state.colors?.[playerId] ?? null;
+  const isMyTurn = state.clocks && myColor && state.clocks.turn === myColor;
+
 
   return (
     <main className="container">
