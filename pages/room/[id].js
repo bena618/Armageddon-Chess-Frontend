@@ -1,38 +1,50 @@
 import { useRouter } from 'next/router';
 import { useEffect, useState, useRef } from 'react';
+
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 let ChessJS = null;
 
-  // Helper cookie functions
-  function getCookie(name) {
-    if (typeof document === 'undefined') return null;
-    const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()\[\]\\\/\\+^])/g, '\\$1') + '=([^;]*)'));
-    return m ? decodeURIComponent(m[1]) : null;
-  }
-  // setCookie expiry is in hours (pass null/undefined for session cookie)
-  function setCookie(name, value, hours) {
-    if (typeof document === 'undefined') return;
-    const maxAge = (typeof hours === 'number' && hours > 0) ? String(Math.floor(hours * 60 * 60)) : undefined;
-    let cookie = `${name}=${encodeURIComponent(value)}; path=/`;
-    if (maxAge) cookie += `; max-age=${maxAge}`;
-    document.cookie = cookie;
-  }
+// Helper cookie functions
+function getCookie(name) {
+  if (typeof document === 'undefined') return null;
+  const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()\[\]\\\/\\+^])/g, '\\$1') + '=([^;]*)'));
+  return m ? decodeURIComponent(m[1]) : null;
+}
 
-  function getStoredPlayerId() {
-    if (playerIdRef.current) return playerIdRef.current;
-    if (typeof window !== 'undefined') {
-      const ls = localStorage.getItem('playerId');
-      if (ls) return ls;
-      const c = getCookie('playerId');
-      if (c) return c;
-    }
-    return null;
+function setCookie(name, value, hours) {
+  if (typeof document === 'undefined') return;
+  const maxAge = (typeof hours === 'number' && hours > 0) ? String(Math.floor(hours * 60 * 60)) : undefined;
+  let cookie = `${name}=${encodeURIComponent(value)}; path=/`;
+  if (maxAge) cookie += `; max-age=${maxAge}`;
+  document.cookie = cookie;
+}
+
+function getStoredPlayerId() {
+  if (playerIdRef.current) return playerIdRef.current;
+  if (typeof window !== 'undefined') {
+    const ls = localStorage.getItem('playerId');
+    if (ls) return ls;
+    const c = getCookie('playerId');
+    if (c) return c;
   }
+  return null;
+}
 
 export default function Room() {
   const router = useRouter();
-  const { id: queryId } = router.query;
+
+  // Safe room ID from URL path (works during static export and client-side)
+  const getRoomId = () => {
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      const match = path.match(/^\/room\/(.+)$/);
+      return match ? match[1] : null;
+    }
+    return null;
+  };
+
+  const roomId = getRoomId() || router.query.id; // Fallback for runtime
 
   const [state, setState] = useState(null);
   const [name, setName] = useState('');
@@ -56,22 +68,13 @@ export default function Room() {
   const shortPollTimeoutRef = useRef(null);
   const timeForfeitSentRef = useRef(false);
   const rejoinAttemptedRef = useRef(false);
-
   const roomIdRef = useRef(null);
-
-
   const [startPending, setStartPending] = useState(false);
 
-  // display ID (from URL) is stored in roomIdRef; backend expects full id prefixed with 'room-'
-  const getBackendRoomId = () => {
-    const rid = roomIdRef.current || queryId || '';
-    return rid.startsWith('room-') ? rid : 'room-' + rid;
-  };
-
+  // Lock room ID from path on first mount (for refresh persistence)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // detect /room/<id> from the pathname directly so refresh preserves auto-join
     const path = window.location.pathname || '';
     const m = path.match(/^\/room\/([^\/]+)/);
     if (!m) {
@@ -82,17 +85,16 @@ export default function Room() {
 
     if (!roomIdRef.current) {
       roomIdRef.current = pathId;
-      console.log('Locked room ID from path:', roomIdRef.current);
     }
 
-    const roomId = roomIdRef.current;
-    if (!roomId) {
+    const currentRoomId = roomIdRef.current;
+    if (!currentRoomId) {
       setError('Invalid room URL');
       return;
     }
 
-    const savedName = typeof window !== 'undefined' ? (localStorage.getItem('playerName') || getCookie('playerName')) : null;
-    const savedPlayerId = typeof window !== 'undefined' ? (localStorage.getItem('playerId') || getCookie('playerId')) : null;
+    const savedName = localStorage.getItem('playerName') || getCookie('playerName');
+    const savedPlayerId = localStorage.getItem('playerId') || getCookie('playerId');
 
     if (savedName && savedPlayerId) {
       setName(savedName);
@@ -103,6 +105,11 @@ export default function Room() {
     }
   }, []);
 
+  const getBackendRoomId = () => {
+    const rid = roomIdRef.current || roomId || '';
+    return rid.startsWith('room-') ? rid : (rid ? 'room-' + rid : null);
+  };
+
   function Countdown({ deadline, totalMs, onExpire }) {
     const [secs, setSecs] = useState(() => deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null);
     const beepedRef = useRef(false);
@@ -111,9 +118,7 @@ export default function Room() {
       const tick = () => {
         const s = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
         setSecs(s);
-        if (s <= 0) {
-          if (onExpire) onExpire();
-        }
+        if (s <= 0 && onExpire) onExpire();
         if (s <= 5 && !beepedRef.current) {
           try {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -193,8 +198,6 @@ export default function Room() {
       return;
     }
 
-    console.log('Joining room:', roomId, 'with player:', playerName);
-
     setJoining(true);
     try {
       const res = await fetch(`${BASE}/rooms/${roomId}/join`, {
@@ -202,8 +205,6 @@ export default function Room() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
       });
-
-      console.log('Join response status:', res.status);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
@@ -213,22 +214,16 @@ export default function Room() {
 
       localStorage.setItem('playerName', playerName);
       localStorage.setItem('playerId', playerId);
-      // cookie fallback (5 hours)
       setCookie('playerName', playerName, 5);
       setCookie('playerId', playerId, 5);
 
       playerIdRef.current = playerId;
       setJoined(true);
 
-      // Delay WebSocket connection to allow backend to broadcast update
-      setTimeout(() => {
-        setupWebSocket();
-      }, 2000);
-
-      await fetchState(); // Immediate state refresh after successful join
+      setTimeout(setupWebSocket, 2000);
+      await fetchState();
     } catch (e) {
       setError('Network error joining room');
-      console.error('Join error:', e);
     } finally {
       setJoining(false);
       setLoading(false);
@@ -240,14 +235,11 @@ export default function Room() {
     if (!backendId || !playerIdRef.current) return;
 
     const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${backendId}/ws?playerId=${playerIdRef.current}`;
-    console.log('Connecting WS to:', wsUrl);
 
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
-      console.log('WebSocket connected to room:', backendId);
-      fetchState(); // Force immediate state refresh when WS connects
-      // start short-lived polling in case a recent join/update wasn't broadcast
+      fetchState();
       try {
         if (shortPollRef.current) clearInterval(shortPollRef.current);
         if (shortPollTimeoutRef.current) clearTimeout(shortPollTimeoutRef.current);
@@ -262,7 +254,6 @@ export default function Room() {
     wsRef.current.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('WS received:', data.type, 'Players:', data.room?.players?.length || 'unknown');
         if (data.type === 'init' || data.type === 'update') {
           const room = data.room;
           if (!room || !room.roomId || room.roomId !== backendId) {
@@ -278,17 +269,14 @@ export default function Room() {
     };
 
     wsRef.current.onclose = (event) => {
-      console.log('WebSocket closed:', event.code, event.reason);
       if (event.code !== 1000) {
         setTimeout(setupWebSocket, 3000);
       }
-      // clear any short polling
-      try { if (shortPollRef.current) clearInterval(shortPollRef.current); shortPollRef.current = null; } catch(e){}
-      try { if (shortPollTimeoutRef.current) clearTimeout(shortPollTimeoutRef.current); shortPollTimeoutRef.current = null; } catch(e){}
+      try { if (shortPollRef.current) clearInterval(shortPollRef.current); } catch(e){}
+      try { if (shortPollTimeoutRef.current) clearTimeout(shortPollTimeoutRef.current); } catch(e){}
     };
 
     wsRef.current.onerror = (e) => {
-      console.error('WebSocket error:', e);
       setError('Connection error - trying to reconnect...');
     };
   }
@@ -335,22 +323,20 @@ export default function Room() {
       setLiveWhiteMs(safeWhite);
       setLiveBlackMs(safeBlack);
 
-      // Local timeout detection: update gameOverInfo for immediate UI feedback and notify server
       if (room.phase === 'PLAYING' && !gameOverInfo) {
         if (safeWhite <= 0 && (!room.winnerId)) {
-          const winner = room.players && room.players.find(p => room.colors && room.colors[p.id] === 'black');
+          const winner = room.players.find(p => room.colors && room.colors[p.id] === 'black');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
-          // notify server once
           if (!timeForfeitSentRef.current) {
             timeForfeitSentRef.current = true;
-            sendTimeForfeit(room.players.find(p => p && p && p.id && (room.colors && room.colors[p.id] === 'white'))?.id || null);
+            sendTimeForfeit(room.players.find(p => room.colors && room.colors[p.id] === 'white')?.id || null);
           }
         } else if (safeBlack <= 0 && (!room.winnerId)) {
-          const winner = room.players && room.players.find(p => room.colors && room.colors[p.id] === 'white');
+          const winner = room.players.find(p => room.colors && room.colors[p.id] === 'white');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
           if (!timeForfeitSentRef.current) {
             timeForfeitSentRef.current = true;
-            sendTimeForfeit(room.players.find(p => p && p && p.id && (room.colors && room.colors[p.id] === 'black'))?.id || null);
+            sendTimeForfeit(room.players.find(p => room.colors && room.colors[p.id] === 'black')?.id || null);
           }
         }
       }
@@ -373,22 +359,19 @@ export default function Room() {
       }
       const data = await res.json();
       const room = data.room || data;
-      console.log('Fetched state - Players:', room.players?.length || 0);
       if (!room || !room.roomId || room.roomId !== backendId) {
         setError('Room not found');
         return;
       }
 
-      // Handle expired start request (both players redirect)
       if (data.startExpired) {
         setMessage('Start request timed out — returning to lobby');
         setTimeout(() => {
           router.push(`/?name=${encodeURIComponent(name || '')}`);
         }, 2000);
-        return; // Stop further processing
+        return;
       }
 
-      // Existing logic for closed rooms
       if (room.closed) {
         const savedPid = getStoredPlayerId();
         const stillInRoom = savedPid && room.players && room.players.find(p => p.id === savedPid);
@@ -404,24 +387,22 @@ export default function Room() {
       updateLocalGameAndClocks(room);
       setState(room);
 
-      // Attempt background rejoin if playerId missing on server
       try {
         const savedPid = getStoredPlayerId();
         const listed = savedPid && room.players && room.players.find(p => p.id === savedPid);
         if (savedPid && !listed && !rejoinAttemptedRef.current) {
           rejoinAttemptedRef.current = true;
-          const savedName = (typeof window !== 'undefined') ? (localStorage.getItem('playerName') || getCookie('playerName')) : null;
-          console.log('Stored playerId not found on server; attempting background rejoin:', savedPid);
+          const savedName = localStorage.getItem('playerName') || getCookie('playerName');
           await autoJoin(savedPid, savedName || '');
         }
       } catch (e) {
         console.warn('Background rejoin attempt failed', e);
       }
     } catch (e) {
-      console.error('Fetch error:', e);
       setError('Failed to load room state');
     }
   }
+
   async function sendTimeForfeit(timedOutPlayerId) {
     const backendId = getBackendRoomId();
     if (!backendId) return;
@@ -431,13 +412,9 @@ export default function Room() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ timedOutPlayerId }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        console.error('Time-forfeit request failed:', err);
-        return;
-      }
+      if (!res.ok) return;
       await fetchState();
-    } catch (e) { console.error('Time-forfeit network error', e); }
+    } catch (e) {}
   }
 
   async function sendRematchVote(agree) {
@@ -451,7 +428,7 @@ export default function Room() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError((data && data.error) || 'Failed to send rematch vote');
+        setError('Failed to send rematch vote');
         return;
       }
       setMessage(data.rematchStarted ? 'Rematch started' : 'Vote recorded');
@@ -460,16 +437,13 @@ export default function Room() {
   }
 
   useEffect(() => {
-    if (!queryId || !joined) return;
+    if (!roomId || !joined) return;
 
-    const interval = setInterval(() => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        fetchState();
-      }
-    }, 1000); // 1-second polling for faster testing/debugging
+    fetchState();
+    const interval = setInterval(fetchState, 2000);
 
     return () => clearInterval(interval);
-  }, [queryId, joined]);
+  }, [roomId, joined]);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -484,13 +458,12 @@ export default function Room() {
       setLiveWhiteMs(safeWhite);
       setLiveBlackMs(safeBlack);
 
-      // Local timeout detection while playing
       if (state.phase === 'PLAYING' && !gameOverInfo) {
         if (safeWhite <= 0 && (!state.winnerId)) {
-          const winner = state.players && state.players.find(p => state.colors && state.colors[p.id] === 'black');
+          const winner = state.players.find(p => state.colors && state.colors[p.id] === 'black');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
         } else if (safeBlack <= 0 && (!state.winnerId)) {
-          const winner = state.players && state.players.find(p => state.colors && state.colors[p.id] === 'white');
+          const winner = state.players.find(p => state.colors && state.colors[p.id] === 'white');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
         }
       }
@@ -522,7 +495,7 @@ export default function Room() {
   }
 
   async function startBidding() {
-    if (startPending) return; // Prevent spam
+    if (startPending) return;
 
     const backendId = getBackendRoomId();
     setStartPending(true);
@@ -542,31 +515,27 @@ export default function Room() {
         return;
       }
 
-      // Success — now wait for confirmation
-      setStartPending(true); // Keep disabled
+      setStartPending(true);
     } catch (e) {
       setMessage('Network error');
       setStartPending(false);
     }
   }
 
-    // In the polling useEffect - make it faster during pending start
   useEffect(() => {
-    if (!id || !joined || !state?.startConfirmDeadline) return;
+    if (!roomId || !joined || !state?.startConfirmDeadline) return;
 
-    // Client-side timeout backup (in case poll is slow)
     const timeoutMs = state.startConfirmDeadline - Date.now();
     let clientTimer;
     if (timeoutMs > 0) {
       clientTimer = setTimeout(() => {
         setMessage('Start request timed out — returning to lobby');
         setStartPending(false);
-        setJoined(false); // Clear join state to show join form again
+        setJoined(false);
         router.push(`/?name=${encodeURIComponent(name || '')}`);
       }, timeoutMs);
     }
 
-    // Poll faster during pending
     const pollInterval = startPending ? 1000 : 2000;
 
     const fetchAndCheck = async () => {
@@ -575,7 +544,7 @@ export default function Room() {
       if (data.startExpired) {
         setMessage('Start request timed out — returning to lobby');
         setStartPending(false);
-        setJoined(false); // Force rejoin prompt
+        setJoined(false);
         setTimeout(() => {
           router.push(`/?name=${encodeURIComponent(name || '')}`);
         }, 1000);
@@ -589,7 +558,7 @@ export default function Room() {
       clearInterval(interval);
       if (clientTimer) clearTimeout(clientTimer);
     };
-  }, [id, joined, startPending, name, state?.startConfirmDeadline, router]);
+  }, [roomId, joined, startPending, name, state?.startConfirmDeadline, router]);
 
   // In the LOBBY phase UI - disable button when pending
   {state.phase === 'LOBBY' && (
