@@ -12,89 +12,75 @@ export default function Home() {
   const autoJoinTimerRef = useRef(null);
   const autoJoinIntervalRef = useRef(null);
 
+  // Pre-fill name from query param (e.g., from timeout redirect)
+  useEffect(() => {
+    const { name: queryName } = router.query;
+    if (queryName) {
+      setName(decodeURIComponent(queryName));
+    }
+  }, [router.query]);
+
   async function create() {
     if (!name.trim()) {
       alert('Please enter your name');
       return;
     }
-    // If we're already on a room URL, auto-join that room instead of creating a new one
-    if (typeof window !== 'undefined' && window.location && window.location.pathname && window.location.pathname.startsWith('/room/')) {
-      console.log('Auto-join: already on a /room/ URL', window.location.pathname);
-      const playerId = crypto.randomUUID();
-      const displayId = window.location.pathname.split('/').filter(Boolean)[1];
-      const backendId = (displayId && displayId.startsWith('room-')) ? displayId : (displayId ? 'room-' + displayId : null);
-      if (!backendId) {
-        alert('Invalid room URL');
-        return;
-      }
 
-      // Try to join the backend directly without a full reload so the room UI updates immediately
+    setLoading(true);
+
+    // If already on a /room/ URL, try to join it instead of creating new
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/room/')) {
+      const pathId = window.location.pathname.split('/').filter(Boolean)[1];
+      const backendId = pathId.startsWith('room-') ? pathId : `room-${pathId}`;
+
+      const playerId = crypto.randomUUID();
+
       try {
-        console.log('Attempting direct join POST /rooms/' + backendId + '/join');
         const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ playerId, name: name.trim() }),
         });
-        const body = await res.text().catch(() => null);
-        console.log('Direct join status:', res.status, 'body:', body);
-        if (!res.ok) {
-          const err = (body && (() => { try { return JSON.parse(body); } catch(e){ return { error: body }; } })()) || { error: 'unknown' };
-          alert('Failed to join room: ' + (err.error || res.status));
-          // fallback to delayed reload (so user can copy logs)
-        } else {
+
+        if (res.ok) {
           localStorage.setItem('playerName', name.trim());
           localStorage.setItem('playerId', playerId);
-          // navigate to same path with query to force remount
-          router.replace(window.location.pathname + '?_joined=' + Date.now());
+          router.replace(window.location.pathname);
           return;
         }
       } catch (e) {
-        console.error('Direct join error', e);
+        console.error('Direct join failed', e);
       }
 
-      // Start a visible countdown and allow cancel so user can copy logs (fallback)
-      const delayMs = 8000;
-      setAutoJoinCountdown(Math.ceil(delayMs / 1000));
+      // Fallback: show countdown and reload
+      setAutoJoinCountdown(8);
       setAutoJoinPending(true);
-      console.log('Reloading to join in', Math.ceil(delayMs / 1000), 's — copy console/network logs now if needed');
-      autoJoinTimerRef.current = setTimeout(() => {
-        window.location.reload();
-      }, delayMs);
+      autoJoinTimerRef.current = setTimeout(() => window.location.reload(), 8000);
       autoJoinIntervalRef.current = setInterval(() => {
-        setAutoJoinCountdown((c) => {
-          if (c <= 1) {
-            clearInterval(autoJoinIntervalRef.current);
-            return 0;
-          }
-          return c - 1;
-        });
+        setAutoJoinCountdown(c => c > 0 ? c - 1 : 0);
       }, 1000);
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
+    // Normal room creation
     try {
-      const createRes = await fetch(`${BASE}/rooms`, {
+      const res = await fetch(`${BASE}/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
 
-      if (!createRes.ok) {
-        const err = await createRes.json().catch(() => ({ error: 'unknown' }));
-        alert('Failed to create room: ' + (err.error || createRes.status));
-        setLoading(false);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'unknown' }));
+        alert('Failed to create room: ' + (err.error || res.status));
         return;
       }
 
-      const createData = await createRes.json();
-      console.log('create response', createData);
-      // try several locations for roomId in case the backend shape varies
-      const roomId = createData?.roomId || createData?.meta?.roomId || (createData?.meta && createData.meta.room && createData.meta.room.roomId) || null;
+      const data = await res.json();
+      const roomId = data.roomId || data.meta?.roomId;
       if (!roomId) {
-        alert('No room ID returned — check console for create response');
-        setLoading(false);
+        alert('No room ID returned');
         return;
       }
 
@@ -102,7 +88,6 @@ export default function Home() {
       localStorage.setItem('playerName', name.trim());
       localStorage.setItem('playerId', playerId);
 
-      // Strip 'room-' prefix for clean URL display
       const displayId = roomId.replace(/^room-/, '');
       router.push(`/room/${displayId}`);
     } catch (e) {
@@ -129,23 +114,19 @@ export default function Home() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         alert('No available games: ' + (err.error || res.status));
-        setLoading(false);
         return;
       }
       const data = await res.json();
       const room = data.room || data;
-      if (!room || !room.roomId) {
-        alert('No room returned from quick match');
-        setLoading(false);
+      if (!room?.roomId) {
+        alert('No room returned');
         return;
       }
       localStorage.setItem('playerName', name.trim());
       localStorage.setItem('playerId', playerId);
-      // Strip 'room-' prefix for clean URL display
       const displayId = room.roomId.replace(/^room-/, '');
       router.push(`/room/${displayId}`);
     } catch (e) {
-      console.error(e);
       alert('Network error joining quick match');
     } finally {
       setLoading(false);
@@ -153,39 +134,43 @@ export default function Home() {
   }
 
   function cancelAutoJoin() {
-    if (autoJoinTimerRef.current) {
-      clearTimeout(autoJoinTimerRef.current);
-      autoJoinTimerRef.current = null;
-    }
-    if (autoJoinIntervalRef.current) {
-      clearInterval(autoJoinIntervalRef.current);
-      autoJoinIntervalRef.current = null;
-    }
+    if (autoJoinTimerRef.current) clearTimeout(autoJoinTimerRef.current);
+    if (autoJoinIntervalRef.current) clearInterval(autoJoinIntervalRef.current);
     setAutoJoinPending(false);
     setAutoJoinCountdown(0);
-    console.log('Auto-join cancelled by user');
   }
 
   return (
     <main className="container">
       <h1>Armageddon Chess</h1>
+
       {autoJoinPending && (
         <div style={{ padding: 12, background: '#fff3cd', border: '1px solid #ffeeba', marginBottom: 12 }}>
-          Reloading to join in <strong>{autoJoinCountdown}s</strong>. Copy console/network logs now if needed.
+          Reloading to join in <strong>{autoJoinCountdown}s</strong>.
           <button onClick={cancelAutoJoin} style={{ marginLeft: 12 }}>Cancel</button>
         </div>
       )}
+
       <input
         placeholder="Your name"
         value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && create()}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && create()}
       />
+
       <div className="actions">
-        <button onClick={create} disabled={loading || !name.trim()}>
+        <button
+          onClick={create}
+          disabled={loading || !name.trim()}
+        >
           {loading ? 'Creating...' : 'Play'}
         </button>
-        <button onClick={quickMatch} disabled={loading || !name.trim()} style={{ marginLeft: 8 }}>
+
+        <button
+          onClick={quickMatch}
+          disabled={loading || !name.trim()}
+          style={{ marginLeft: 8 }}
+        >
           {loading ? 'Joining...' : 'Quick Match'}
         </button>
       </div>
