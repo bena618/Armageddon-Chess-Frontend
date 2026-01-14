@@ -59,6 +59,9 @@ export default function Room() {
 
   const roomIdRef = useRef(null);
 
+
+  const [startPending, setStartPending] = useState(false);
+
   // display ID (from URL) is stored in roomIdRef; backend expects full id prefixed with 'room-'
   const getBackendRoomId = () => {
     const rid = roomIdRef.current || queryId || '';
@@ -519,48 +522,95 @@ export default function Room() {
   }
 
   async function startBidding() {
-    const backendId = getBackendRoomId();
-    try {
-      const res = await fetch(`${BASE}/rooms/${backendId}/start-bidding`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playerId: playerIdRef.current }) });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setError('Failed to start bidding: ' + (err.error || res.status));
-        return;
-      }
-      // if server returned startRequestedBy, surface a small message
-      const body = await res.json().catch(() => ({}));
-      if (body.startRequestedBy && body.startConfirmDeadline) {
-        const by = state.players.find(p => p.id === body.startRequestedBy);
-        setMessage((by && by.name) ? `${by.name} requested bidding; waiting for confirmation` : 'Bidding requested; waiting for confirmation');
-      }
-    } catch (e) { setError('Network error'); }
-  }
+    if (startPending) return; // Prevent spam
 
-  async function submitBid() {
-    const playerId = playerIdRef.current;
-    if (!playerId) { setError('Missing player id'); return; }
-    const mins = Number(bidMinutes) || 0;
-    const secs = Number(bidSeconds) || 0;
-    if (!Number.isFinite(mins) || mins < 0) { setError('Invalid minutes'); return; }
-    if (!Number.isFinite(secs) || secs < 0 || secs > 59) { setError('Seconds must be between 0 and 59'); return; }
-    const ms = Math.floor(mins * 60 * 1000 + secs * 1000);
-    if (state && typeof state.mainTimeMs === 'number' && ms > state.mainTimeMs) { setError('Bid cannot exceed game main time'); return; }
     const backendId = getBackendRoomId();
+    setStartPending(true);
+    setMessage('Requesting start... waiting for opponent');
+
     try {
-      const res = await fetch(`${BASE}/rooms/${backendId}/submit-bid`, {
+      const res = await fetch(`${BASE}/rooms/${backendId}/start-bidding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, amount: ms }),
+        body: JSON.stringify({ playerId: playerIdRef.current }),
       });
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setError('Failed to submit bid: ' + (err.error || res.status));
+        setMessage('Failed to request start');
+        setStartPending(false);
         return;
       }
-      setBidMinutes('0');
-      setBidSeconds('0');
-    } catch (e) { setError('Network error'); }
+
+      // Success — now wait for confirmation
+      setStartPending(true); // Keep disabled
+    } catch (e) {
+      setMessage('Network error');
+      setStartPending(false);
+    }
   }
+
+  // In the polling useEffect - make it faster during pending start
+  useEffect(() => {
+    if (!id || !joined) return;
+
+    const pollInterval = startPending ? 1000 : 2000; // Faster poll during pending (1s)
+
+    const fetchAndCheck = async () => {
+      await fetchState();
+
+      if (data.startExpired) {
+        setMessage('Start request timed out — returning to lobby');
+        setStartPending(false);
+        setTimeout(() => {
+          router.push(`/?name=${encodeURIComponent(name || '')}`);
+        }, 2000);
+      }
+    };
+
+    fetchAndCheck();
+    const interval = setInterval(fetchAndCheck, pollInterval);
+
+    return () => clearInterval(interval);
+  }, [id, joined, startPending, name, router]);
+
+  // In the LOBBY phase UI - disable button when pending
+  {state.phase === 'LOBBY' && (
+    <div style={{ marginTop: 16 }}>
+      {startPending || state.startRequestedBy ? (
+        <div style={{ padding: 12, background: '#fff3cd', border: '1px solid #ffeeba', borderRadius: 8 }}>
+          <p>
+            {state.startRequestedBy === playerIdRef.current ? (
+              'You requested to start bidding — waiting for opponent to confirm'
+            ) : (
+              `${state.players.find(p => p.id === state.startRequestedBy)?.name || 'Opponent'} requested to start bidding`
+            )}
+          </p>
+          <Countdown 
+            deadline={state.startConfirmDeadline} 
+            totalMs={10000}
+            onExpire={() => {
+              setMessage('Start request timed out — returning to lobby');
+              setStartPending(false);
+              setTimeout(() => router.push('/'), 2000);
+            }}
+          />
+          {state.startRequestedBy !== playerIdRef.current && !startPending && (
+            <button onClick={startBidding}>
+              Confirm Start Bidding
+            </button>
+          )}
+        </div>
+      ) : (
+        <button 
+          onClick={startBidding} 
+          disabled={state.players.length < state.maxPlayers}
+        >
+          Start Bidding
+        </button>
+      )}
+    </div>
+  )}
 
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
