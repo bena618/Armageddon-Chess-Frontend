@@ -923,7 +923,7 @@ export default function Room() {
                 </div>
                 <div style={{ alignSelf: 'flex-end' }}>
                   <button onClick={submitBid}>Submit Bid</button>
-z                </div>
+                </div>
               </div>
             </div>
           )}
