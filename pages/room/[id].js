@@ -522,43 +522,52 @@ export default function Room() {
     }
   }
 
-  useEffect(() => {
-    if (!roomId || !joined || !state?.startConfirmDeadline) return;
-
-    const timeoutMs = state.startConfirmDeadline - Date.now();
-    let clientTimer;
-    if (timeoutMs > 0) {
-      clientTimer = setTimeout(() => {
-        setMessage('Start request timed out — returning to lobby');
-        setStartPending(false);
-        setJoined(false);
-        router.push(`/?name=${encodeURIComponent(name || '')}`);
-      }, timeoutMs);
+  async function submitBid() {
+    const minutes = parseInt(bidMinutes, 10);
+    const seconds = parseInt(bidSeconds, 10);
+    if (isNaN(minutes) || isNaN(seconds) || (minutes === 0 && seconds === 0)) {
+      setMessage('Invalid bid time');
+      return;
     }
 
-    const pollInterval = startPending ? 1000 : 2000;
+    const amountMs = (minutes * 60 + seconds) * 1000;
+
+    const backendId = getBackendRoomId();
+    try {
+      const res = await fetch(`${BASE}/rooms/${backendId}/submit-bid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerId: playerIdRef.current,
+          amount: amountMs,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setMessage('Bid failed: ' + (err.error || 'Unknown error'));
+        return;
+      }
+
+      setMessage('Bid submitted!');
+      await fetchState();
+    } catch (e) {
+      setMessage('Network error submitting bid');
+    }
+  }
+
+  useEffect(() => {
+    if (!roomId || !joined) return;
 
     const fetchAndCheck = async () => {
-      await fetchState();
-
-      if (data.startExpired) {
-        setMessage('Start request timed out — returning to lobby');
-        setStartPending(false);
-        setJoined(false);
-        setTimeout(() => {
-          router.push(`/?name=${encodeURIComponent(name || '')}`);
-        }, 1000);
-      }
+      await fetchState(); 
     };
 
     fetchAndCheck();
-    const interval = setInterval(fetchAndCheck, pollInterval);
+    const interval = setInterval(fetchAndCheck, startPending ? 1000 : 2000);
 
-    return () => {
-      clearInterval(interval);
-      if (clientTimer) clearTimeout(clientTimer);
-    };
-  }, [roomId, joined, startPending, name, state?.startConfirmDeadline, router]);
+    return () => clearInterval(interval);
+  }, [roomId, joined, startPending]);
 
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
@@ -889,7 +898,7 @@ export default function Room() {
             </div>
           )}
 
-          {state.phase === 'BIDDING' && (
+          {state?.phase === 'BIDDING' && (
             <div>
               <p>Bid deadline: {state?.bidDeadline ? <><LiveTimer deadline={state.bidDeadline} format="mm:ss" /> ({new Date(state.bidDeadline).toLocaleTimeString()})</> : '—'}</p>
               <p>Existing bids:</p>
@@ -914,7 +923,7 @@ export default function Room() {
                 </div>
                 <div style={{ alignSelf: 'flex-end' }}>
                   <button onClick={submitBid}>Submit Bid</button>
-                </div>
+z                </div>
               </div>
             </div>
           )}
@@ -922,7 +931,7 @@ export default function Room() {
           {state.phase === 'COLOR_PICK' && (
             <div>
               <p>Winner: {(state?.players?.find(p => p.id === state?.winnerId)?.name) || state?.winnerId || '—'}</p>
-              <p>Current picker: {state.currentPicker}</p>
+              <p>Current picker: {state?.currentPicker || '—'}</p>
               {(() => {
                 const canChoose = (state.currentPicker === 'winner' && playerId === state.winnerId) || (state.currentPicker === 'loser' && playerId === state.loserId);
                 if (canChoose) {
@@ -965,12 +974,12 @@ export default function Room() {
                 <div style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{pgn}</div>
               </div>
 
-              {state.phase === 'FINISHED' && (
+              {state?.phase === 'FINISHED' && (
                 <div style={{ marginTop: 12, padding: 8, border: '1px solid #ddd', background: '#f7fff7' }}>
                   <div style={{ marginBottom: 8 }}>
                     <strong>Result:</strong> {gameOverInfo ? `${gameOverInfo.winnerName || gameOverInfo.winnerId || gameOverInfo.color} (${gameOverInfo.color}) wins` : (state.winnerId ? (state.players.find(p => p.id === state.winnerId)?.name || state.winnerId) : 'Game finished')}
                   </div>
-                  {state.rematchWindowEnds ? (
+                  {state?.rematchWindowEnds ? (
                     <div>
                       <div style={{ marginBottom: 8 }}>Rematch voting open — ends in <em><LiveTimer deadline={state.rematchWindowEnds} /></em></div>
                       <div style={{ display: 'flex', gap: 8 }}>
