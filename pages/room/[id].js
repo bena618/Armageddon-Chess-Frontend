@@ -367,7 +367,8 @@ export default function Room() {
       if (data.startExpired) {
         setMessage('Start request timed out — returning to lobby');
         setTimeout(() => {
-          router.push(`/?name=${encodeURIComponent(name || '')}`);
+          const playerName = localStorage.getItem('playerName') || getCookie('playerName') || name || '';
+          router.replace(`/?name=${encodeURIComponent(playerName)}`);
         }, 2000);
         return;
       }
@@ -886,9 +887,15 @@ export default function Room() {
                     ) : (
                       <div>{(state.players.find(p => p.id === state.startRequestedBy)?.name) || state.startRequestedBy} requested bidding — click <strong>Start Bidding</strong> to confirm</div>
                     )}
+                    <div style={{ fontSize: '14px', color: '#666', marginTop: 4 }}>
+                      Both players return to lobby if no confirmation in:
+                    </div>
                   </div>
                   <div>
-                    <Countdown deadline={state.startConfirmDeadline} totalMs={state.choiceDurationMs} onExpire={() => setMessage('Start request expired')} />
+                    <Countdown 
+                      deadline={state.startConfirmDeadline} 
+                      totalMs={state.choiceDurationMs} 
+                      onExpire={() => setMessage('Returning to lobby')} />
                   </div>
                 </div>
               ) : null}
