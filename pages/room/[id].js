@@ -802,16 +802,16 @@ export default function Room() {
     return parts.join(' ');
   }
 
+  if (!state) {
+    return <div className="container">Loading room state...</div>;
+  }
+
   if (!queryId) {
     return <div className="container">Loading room...</div>;
   }
 
   if (loading || joining) {
     return <div className="container">{joining ? 'Joining room...' : 'Loading...'}</div>;
-  }
-
-  if (!state) {
-    return <div className="container">Loading room state...</div>;
   }
 
   const playerId = playerIdRef.current;
