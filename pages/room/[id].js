@@ -810,6 +810,10 @@ export default function Room() {
     return <div className="container">{joining ? 'Joining room...' : 'Loading...'}</div>;
   }
 
+  if (!state) {
+    return <div className="container">Loading room state...</div>;
+  }
+
   const playerId = playerIdRef.current;
   const amIWinner = state && state.winnerId && playerId === state.winnerId;
   const myColor = state && state.colors ? state.colors[playerId] : null;
@@ -817,7 +821,7 @@ export default function Room() {
 
   return (
     <main className="container">
-      <h2>Room {roomIdRef.current || queryId}</h2>
+      <h2>Room {roomIdRef.current || roomId || '...'}</h2>
 
       <div className="share">
         <input readOnly value={typeof window !== 'undefined' ? window.location.href.split('?')[0] : ''} />
@@ -886,23 +890,24 @@ export default function Room() {
               </div>
             </div>
           ) : null}
-          <h3>Room State — {state.phase}</h3>
+          <h3>Room State — {state?.phase || 'Loading...'}</h3>
 
           <div>
             <strong>Players:</strong>
             <ul>
-              {state.players.map(p => (
-                <li key={p.id}>{p.name || p.id}{state.phase === 'COLOR_PICK' && p.id === state.winnerId ? ' (bid winner)' : ''}</li>
-              ))}
+              {state?.players?.map(p => (
+                <li key={p.id}>{p.name || p.id}{state?.phase === 'COLOR_PICK' && p.id === state?.winnerId ? ' (bid winner)' : ''}</li>
+              )) || <li>Loading players...</li>}
             </ul>
           </div>
 
-          {state.phase === 'LOBBY' && (
+
+          {state?.phase === 'LOBBY' && (
             <div>
-              {state.startRequestedBy ? (
+              {state?.startRequestedBy ? (
                 <div style={{ marginBottom: 8, padding: 8, border: '1px solid #ccc', background: '#fff8e6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    {state.startRequestedBy === playerId ? (
+                    {state.startRequestedBy === playerIdRef.current ? (
                       <div>You requested bidding — waiting for opponent</div>
                     ) : (
                       <div>{(state.players.find(p => p.id === state.startRequestedBy)?.name) || state.startRequestedBy} requested bidding — click <strong>Start Bidding</strong> to confirm</div>
@@ -913,13 +918,15 @@ export default function Room() {
                   </div>
                 </div>
               ) : null}
-              <button onClick={startBidding} disabled={state.players.length < state.maxPlayers}>{state.startRequestedBy && state.startRequestedBy !== playerId ? 'Confirm Start' : 'Start Bidding'}</button>
+              <button onClick={startBidding} disabled={state?.players?.length < state?.maxPlayers}>
+                {state?.startRequestedBy && state.startRequestedBy !== playerIdRef.current ? 'Confirm Start' : 'Start Bidding'}
+              </button>
             </div>
           )}
 
           {state.phase === 'BIDDING' && (
             <div>
-              <p>Bid deadline: {state.bidDeadline ? <><LiveTimer deadline={state.bidDeadline} format="mm:ss" /> ({new Date(state.bidDeadline).toLocaleTimeString()})</> : '—'}</p>
+              <p>Bid deadline: {state?.bidDeadline ? <><LiveTimer deadline={state.bidDeadline} format="mm:ss" /> ({new Date(state.bidDeadline).toLocaleTimeString()})</> : '—'}</p>
               <p>Existing bids:</p>
               <ul>
                 {state.players.map(p => {
@@ -949,7 +956,7 @@ export default function Room() {
 
           {state.phase === 'COLOR_PICK' && (
             <div>
-              <p>Winner: {(state.players && state.players.find(p => p.id === state.winnerId) && state.players.find(p => p.id === state.winnerId).name) || state.winnerId || '—'}</p>
+              <p>Winner: {(state?.players?.find(p => p.id === state?.winnerId)?.name) || state?.winnerId || '—'}</p>
               <p>Current picker: {state.currentPicker}</p>
               {(() => {
                 const canChoose = (state.currentPicker === 'winner' && playerId === state.winnerId) || (state.currentPicker === 'loser' && playerId === state.loserId);
@@ -968,7 +975,7 @@ export default function Room() {
             </div>
           )}
 
-          {(state.phase === 'PLAYING' || state.phase === 'FINISHED') && (
+          {(state?.phase === 'PLAYING' || state?.phase === 'FINISHED') && (
             <div>
               <div style={{ display: 'flex', gap: 12 }}>
                 <div>
