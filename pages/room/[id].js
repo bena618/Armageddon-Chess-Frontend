@@ -550,11 +550,24 @@ export default function Room() {
     }
   }
 
-  // In the polling useEffect - make it faster during pending start
+    // In the polling useEffect - make it faster during pending start
   useEffect(() => {
-    if (!id || !joined) return;
+    if (!id || !joined || !state?.startConfirmDeadline) return;
 
-    const pollInterval = startPending ? 1000 : 2000; // Faster poll during pending (1s)
+    // Client-side timeout backup (in case poll is slow)
+    const timeoutMs = state.startConfirmDeadline - Date.now();
+    let clientTimer;
+    if (timeoutMs > 0) {
+      clientTimer = setTimeout(() => {
+        setMessage('Start request timed out — returning to lobby');
+        setStartPending(false);
+        setJoined(false); // Clear join state to show join form again
+        router.push(`/?name=${encodeURIComponent(name || '')}`);
+      }, timeoutMs);
+    }
+
+    // Poll faster during pending
+    const pollInterval = startPending ? 1000 : 2000;
 
     const fetchAndCheck = async () => {
       await fetchState();
@@ -562,17 +575,21 @@ export default function Room() {
       if (data.startExpired) {
         setMessage('Start request timed out — returning to lobby');
         setStartPending(false);
+        setJoined(false); // Force rejoin prompt
         setTimeout(() => {
           router.push(`/?name=${encodeURIComponent(name || '')}`);
-        }, 2000);
+        }, 1000);
       }
     };
 
     fetchAndCheck();
     const interval = setInterval(fetchAndCheck, pollInterval);
 
-    return () => clearInterval(interval);
-  }, [id, joined, startPending, name, router]);
+    return () => {
+      clearInterval(interval);
+      if (clientTimer) clearTimeout(clientTimer);
+    };
+  }, [id, joined, startPending, name, state?.startConfirmDeadline, router]);
 
   // In the LOBBY phase UI - disable button when pending
   {state.phase === 'LOBBY' && (
