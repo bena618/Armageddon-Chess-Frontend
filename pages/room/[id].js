@@ -375,24 +375,33 @@ export default function Room() {
         setError('Room not found');
         return;
       }
-      // if server marked room closed due to expired start request, inform user and redirect
+
+      // Handle expired start request (both players redirect)
+      if (data.startExpired) {
+        setMessage('Start request timed out — returning to lobby');
+        setTimeout(() => {
+          router.push(`/?name=${encodeURIComponent(name || '')}`);
+        }, 2000);
+        return; // Stop further processing
+      }
+
+      // Existing logic for closed rooms
       if (room.closed) {
-        // only redirect if this client is NOT still listed as a player in the room
         const savedPid = getStoredPlayerId();
         const stillInRoom = savedPid && room.players && room.players.find(p => p.id === savedPid);
         if (stillInRoom) {
-          // keep the client in the room UI (preserve experience across refresh)
           setMessage('Start request expired on server, but your player record still present; staying on page.');
         } else {
           setMessage('Players did not press start — sending you back to lobby');
           setTimeout(() => router.replace('/'), 5000);
-          return; // stop further processing
+          return;
         }
       }
+
       updateLocalGameAndClocks(room);
       setState(room);
 
-      // If our stored playerId exists locally but server doesn't list us, try a one-time rejoin
+      // Attempt background rejoin if playerId missing on server
       try {
         const savedPid = getStoredPlayerId();
         const listed = savedPid && room.players && room.players.find(p => p.id === savedPid);
@@ -410,7 +419,6 @@ export default function Room() {
       setError('Failed to load room state');
     }
   }
-
   async function sendTimeForfeit(timedOutPlayerId) {
     const backendId = getBackendRoomId();
     if (!backendId) return;
