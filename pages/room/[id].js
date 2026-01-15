@@ -20,17 +20,6 @@ function setCookie(name, value, hours) {
   document.cookie = cookie;
 }
 
-function getStoredPlayerId() {
-  if (playerIdRef.current) return playerIdRef.current;
-  if (typeof window !== 'undefined') {
-    const ls = localStorage.getItem('playerId');
-    if (ls) return ls;
-    const c = getCookie('playerId');
-    if (c) return c;
-  }
-  return null;
-}
-
 export default function Room() {
   const router = useRouter();
 
@@ -70,6 +59,17 @@ export default function Room() {
   const rejoinAttemptedRef = useRef(false);
   const roomIdRef = useRef(null);
   const [startPending, setStartPending] = useState(false);
+
+  function getStoredPlayerId() {
+    if (playerIdRef.current) return playerIdRef.current;
+    if (typeof window !== 'undefined') {
+      const ls = localStorage.getItem('playerId');
+      if (ls) return ls;
+      const c = getCookie('playerId');
+      if (c) return c;
+    }
+    return null;
+  }
 
   // Lock room ID from path on first mount (for refresh persistence)
   useEffect(() => {
@@ -883,7 +883,7 @@ export default function Room() {
                 <div style={{ marginBottom: 8, padding: 8, border: '1px solid #ccc', background: '#fff8e6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     {state.startRequestedBy === playerIdRef.current ? (
-                      <div>You requested bidding — waiting for opponent</div>
+                      <div>You requested bidding — waiting for opponent confirmation</div>
                     ) : (
                       <div>{(state.players.find(p => p.id === state.startRequestedBy)?.name) || state.startRequestedBy} requested bidding — click <strong>Start Bidding</strong> to confirm</div>
                     )}
