@@ -373,18 +373,6 @@ export default function Room() {
         return;
       }
 
-      if (room.closed) {
-        const savedPid = getStoredPlayerId();
-        const stillInRoom = savedPid && room.players && room.players.find(p => p.id === savedPid);
-        if (stillInRoom) {
-          setMessage('Start request expired on server, but your player record still present; staying on page.');
-        } else {
-          setMessage('Players did not press start — sending you back to lobby');
-          setTimeout(() => router.replace('/'), 5000);
-          return;
-        }
-      }
-
       updateLocalGameAndClocks(room);
       setState(room);
 
