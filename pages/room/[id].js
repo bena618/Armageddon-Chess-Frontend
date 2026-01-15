@@ -217,6 +217,12 @@ export default function Room() {
       setCookie('playerName', playerName, 5);
       setCookie('playerId', playerId, 5);
 
+      await fetch(`${BASE}/rooms/${roomId}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId, name: playerName })
+      }).catch(e => console.error('Re-join failed:', e));
+
       playerIdRef.current = playerId;
       setJoined(true);
 
@@ -240,6 +246,21 @@ export default function Room() {
 
     wsRef.current.onopen = () => {
       fetchState();
+      
+      // *** HEARTBEAT: Keep connection alive every 5s ***
+      const heartbeat = setInterval(async () => {
+        try {
+          await fetch(`${BASE}/rooms/${getBackendRoomId()}/heartbeat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ playerId: playerIdRef.current })
+          });
+        } catch (e) {
+          console.error('Heartbeat failed:', e);
+        }
+      }, 5000);
+      wsRef.current.heartbeatInterval = heartbeat;
+      
       try {
         if (shortPollRef.current) clearInterval(shortPollRef.current);
         if (shortPollTimeoutRef.current) clearTimeout(shortPollTimeoutRef.current);
@@ -275,6 +296,12 @@ export default function Room() {
 
     
     wsRef.current.onclose = (event) => {
+      // *** CLEANUP HEARTBEAT ***
+      if (wsRef.current && wsRef.current.heartbeatInterval) {
+        clearInterval(wsRef.current.heartbeatInterval);
+        wsRef.current.heartbeatInterval = null;
+      }
+      
       if (event.code !== 1000) {
         setTimeout(setupWebSocket, 3000);
       }
@@ -384,7 +411,7 @@ export default function Room() {
         }, 2000);
         return;
       }
-      
+
       updateLocalGameAndClocks(room);
       setState(room);
 
