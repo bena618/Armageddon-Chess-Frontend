@@ -797,14 +797,8 @@ export default function Room() {
 
     const myPid = playerIdRef.current;
     const myColor = state && state.colors ? state.colors[myPid] : null;
-
-    console.log('Board render:', { myPid, myColor, colors: state?.colors, phase: state?.phase });
     const isMyTurnLocal = state && state.clocks && myColor && state.clocks.turn === myColor;
 
-    const orientation = myColor || (state?.phase === 'PLAYING' ? 'white' : 'white');
-    console.log('Board orientation:', orientation, 'myColor:', myColor, 'phase:', state?.phase);
-
-    // compute legal targets for the currently selected square only for player whose turn
     let legalTargets = new Set();
     try {
       if (isMyTurnLocal && selected && ChessJS && localGameRef.current) {
@@ -816,15 +810,17 @@ export default function Room() {
 
     const squares = [];
 
-    for (let rIdx = 0; rIdx < 8; rIdx++) {
-      for (let cIdx = 0; cIdx < 8; cIdx++) {
+    for (let displayRow = 0; displayRow < 8; displayRow++) {
+      for (let displayCol = 0; displayCol < 8; displayCol++) {
+        // Map display coordinates back to FEN matrix coordinates
+        const rIdx = myColor === 'black' ? 7 - displayRow : displayRow;
+        const cIdx = myColor === 'black' ? 7 - displayCol : displayCol;
+        
         const cell = matrix[rIdx][cIdx];
 
-        const displayRow = myColor === 'black' ? 7 - rIdx : rIdx;
-        const displayCol = myColor === 'black' ? 7 - cIdx : cIdx;
-
-        const rank = myColor === 'black' ? displayRow + 1 : 8 - displayRow;
-        const fileIndex = myColor === 'black' ? 7 - displayCol : displayCol;
+        // Square name from display perspective
+        const rank = myColor === 'black' ? (8 - displayRow) : (displayRow + 1);
+        const fileIndex = myColor === 'black' ? displayCol : (7 - displayCol);
         const file = 'abcdefgh'[fileIndex];
         const sq = `${file}${rank}`;
 
@@ -839,9 +835,8 @@ export default function Room() {
             key={sq}
             onClick={() => {
               if (!isMyTurnLocal) { setMessage('Not your turn'); return; }
-              if (!selected) {
-                setSelected(sq);
-              } else {
+              if (!selected) { setSelected(sq); }
+              else {
                 const uci = `${selected}${sq}`;
                 setSelected(null);
                 makeMoveUci(uci);
@@ -857,15 +852,9 @@ export default function Room() {
               }
             }}
             style={{
-              width: 54,
-              height: 54,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: bg,
-              cursor: 'pointer',
-              fontSize: 28,
-              boxSizing: 'border-box',
+              width: 54, height: 54, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', background: bg, cursor: 'pointer',
+              fontSize: 28, boxSizing: 'border-box',
               border: isSelected ? '2px solid #f39c12' : '1px solid rgba(0,0,0,0.15)'
             }}
           >
@@ -887,19 +876,15 @@ export default function Room() {
     }
 
     return (
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(8,54px)',
-          gap: 0,
-          border: '2px solid #222',
-          boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
-        }}
-      >
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(8,54px)', gap: 0,
+        border: '2px solid #222', boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
+      }}>
         {squares}
       </div>
     );
   }
+
 
 
   function formatMs(ms) {
