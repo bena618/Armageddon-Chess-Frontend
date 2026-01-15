@@ -415,6 +415,32 @@ export default function Room() {
       updateLocalGameAndClocks(room);
       setState(room);
 
+      if (room.phase === 'FINISHED') {
+        if (room.result === 'draw') {
+          setGameOverInfo({ winnerId: null, winnerName: null, color: null });
+          setMessage(`Draw${room.reason ? ` (${room.reason})` : ''}`);
+        } else if (room.winnerId) {
+          const winner = room.players.find(p => p.id === room.winnerId);
+          const color = room.colors ? room.colors[room.winnerId] : null;
+          setGameOverInfo({
+            winnerId: room.winnerId,
+            winnerName: winner ? winner.name : null,
+            color
+          });
+          if (room.result === 'time_forfeit') {
+            setMessage('Win on time');
+          } else if (room.result === 'checkmate') {
+            setMessage('Checkmate');
+          } else {
+            // Fallback for other finish reasons (e.g. disconnect_forfeit)
+            setMessage('Game over');
+          }
+        } else {
+          // Finished with no winner (e.g. aborted game without result/reason)
+          setMessage('Game over');
+        }
+      }
+
       try {
         const savedPid = getStoredPlayerId();
         const listed =
@@ -687,11 +713,31 @@ export default function Room() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, move: finalUci }),
       });
+
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        setError('Move rejected: ' + (err.error || res.status));
+        setError('Move rejected: ' + (data.error || res.status));
         return false;
       }
+
+      if (data.result) {
+        if (data.result === 'draw') {
+          setGameOverInfo({ winnerId: null, winnerName: null, color: null });
+          setMessage(`Draw${data.reason ? ` (${data.reason})` : ''}`);
+        } else if (data.result === 'checkmate' || data.result === 'time_forfeit') {
+          const winnerId = data.winnerId || null;
+          const winner = state && state.players ? state.players.find(p => p.id === winnerId) : null;
+          const color = state && state.colors && winnerId ? state.colors[winnerId] : null;
+          setGameOverInfo({ winnerId, winnerName: winner ? winner.name : null, color });
+          setMessage(
+            data.result === 'checkmate'
+              ? 'Checkmate'
+              : 'Win on time'
+          );
+        }
+      }
+
       return true;
     } catch (e) {
       setError('Network error');
@@ -736,13 +782,17 @@ export default function Room() {
   }
 
   const [selected, setSelected] = useState(null);
-  function Board({fen}){
-    const matrix = fen === 'start' ? fenToMatrix('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR') : fenToMatrix(fen);
+
+  function Board({ fen }) {
+    const matrix = fen === 'start'
+      ? fenToMatrix('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR')
+      : fenToMatrix(fen);
+
     const myPid = playerIdRef.current;
     const myColor = state && state.colors ? state.colors[myPid] : null;
     const isMyTurnLocal = state && state.clocks && myColor && state.clocks.turn === myColor;
 
-    // compute legal targets for the currently selected square only if it's my turn
+    // compute legal targets for the currently selected square only for player whose turn
     let legalTargets = new Set();
     try {
       if (isMyTurnLocal && selected && ChessJS && localGameRef.current) {
@@ -752,50 +802,93 @@ export default function Room() {
       }
     } catch (e) {}
 
+    const squares = [];
+
+    for (let rIdx = 0; rIdx < 8; rIdx++) {
+      for (let cIdx = 0; cIdx < 8; cIdx++) {
+        const cell = matrix[rIdx][cIdx];
+
+        const displayRow = myColor === 'black' ? 7 - rIdx : rIdx;
+        const displayCol = myColor === 'black' ? 7 - cIdx : cIdx;
+
+        const rank = myColor === 'black' ? displayRow + 1 : 8 - displayRow;
+        const fileIndex = myColor === 'black' ? 7 - displayCol : displayCol;
+        const file = 'abcdefgh'[fileIndex];
+        const sq = `${file}${rank}`;
+
+        const isLight = (displayRow + displayCol) % 2 === 0;
+        const baseColor = isLight ? '#f0d9b5' : '#b58863';
+        const isSelected = selected === sq;
+        const isTarget = legalTargets.has(sq);
+        const bg = isSelected ? '#ffeb99' : (isTarget ? '#9fe29f' : baseColor);
+
+        squares.push(
+          <div
+            key={sq}
+            onClick={() => {
+              if (!isMyTurnLocal) { setMessage('Not your turn'); return; }
+              if (!selected) {
+                setSelected(sq);
+              } else {
+                const uci = `${selected}${sq}`;
+                setSelected(null);
+                makeMoveUci(uci);
+              }
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              const from = e.dataTransfer.getData('text/from');
+              if (from) {
+                const uci = `${from}${sq}`;
+                setSelected(null);
+                makeMoveUci(uci);
+              }
+            }}
+            style={{
+              width: 54,
+              height: 54,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: bg,
+              cursor: 'pointer',
+              fontSize: 28,
+              boxSizing: 'border-box',
+              border: isSelected ? '2px solid #f39c12' : '1px solid rgba(0,0,0,0.15)'
+            }}
+          >
+            {cell ? (
+              <div
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/from', sq);
+                  try { e.dataTransfer.setDragImage(e.currentTarget, 16, 16); } catch (e) {}
+                }}
+                style={{ cursor: 'grab', userSelect: 'none' }}
+              >
+                <Piece piece={cell} />
+              </div>
+            ) : ''}
+          </div>
+        );
+      }
+    }
+
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8,54px)', gap: 0, border: '2px solid #222', boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
-        {matrix.flatMap((row, rIdx) => row.map((cell, cIdx) => {
-          const rank = 8 - rIdx;
-          const file = 'abcdefgh'[cIdx];
-          const sq = `${file}${rank}`;
-          const isLight = (rIdx + cIdx) % 2 === 0;
-          const baseColor = isLight ? '#f0d9b5' : '#b58863';
-          const isSelected = selected === sq;
-          const isTarget = legalTargets.has(sq);
-          const bg = isSelected ? '#ffeb99' : (isTarget ? '#9fe29f' : baseColor);
-          return (
-            <div key={sq}
-              onClick={() => {
-                // block selection when it's not my turn
-                if (!isMyTurnLocal) { setMessage('Not your turn'); return; }
-                if (!selected) { setSelected(sq); }
-                else {
-                  const uci = `${selected}${sq}`;
-                  setSelected(null);
-                  makeMoveUci(uci);
-                }
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                const from = e.dataTransfer.getData('text/from');
-                if (from) {
-                  const uci = `${from}${sq}`;
-                  setSelected(null);
-                  makeMoveUci(uci);
-                }
-              }}
-              style={{ width:54, height:54, display:'flex', alignItems:'center', justifyContent:'center', background: bg, cursor: 'pointer', fontSize: 28, boxSizing: 'border-box', border: isSelected ? '2px solid #f39c12' : '1px solid rgba(0,0,0,0.15)' }}>
-              {cell ? (
-                <div draggable onDragStart={(e) => { e.dataTransfer.setData('text/from', sq); try { e.dataTransfer.setDragImage(e.currentTarget, 16, 16); } catch(e){} }} style={{ cursor: 'grab', userSelect: 'none' }}>
-                  <Piece piece={cell} />
-                </div>
-              ) : ''}
-            </div>
-          );
-        }))}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(8,54px)',
+          gap: 0,
+          border: '2px solid #222',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
+        }}
+      >
+        {squares}
       </div>
     );
   }
+
 
   function formatMs(ms) {
     if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—';
@@ -1017,9 +1110,16 @@ export default function Room() {
 
               {state?.phase === 'FINISHED' && (
                 <div style={{ marginTop: 12, padding: 8, border: '1px solid #ddd', background: '#f7fff7' }}>
-                  <div style={{ marginBottom: 8 }}>
-                    <strong>Result:</strong> {gameOverInfo ? `${gameOverInfo.winnerName || gameOverInfo.winnerId || gameOverInfo.color} (${gameOverInfo.color}) wins` : (state.winnerId ? (state.players.find(p => p.id === state.winnerId)?.name || state.winnerId) : 'Game finished')}
-                  </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Result:</strong>{' '}
+                      {state.result === 'draw'
+                        ? `Draw${state.reason ? ` (${state.reason})` : ''}`
+                        : (gameOverInfo
+                            ? `${gameOverInfo.winnerName || gameOverInfo.winnerId || gameOverInfo.color} (${gameOverInfo.color || 'winner'}) wins`
+                            : (state.winnerId
+                                ? (state.players.find(p => p.id === state.winnerId)?.name || state.winnerId) + ' wins'
+                                : 'Game finished'))}
+                    </div>
                   {state?.rematchWindowEnds ? (
                     <div>
                       <div style={{ marginBottom: 8 }}>Rematch voting open — ends in <em><LiveTimer deadline={state.rematchWindowEnds} /></em></div>
