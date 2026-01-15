@@ -353,7 +353,7 @@ export default function Room() {
         setLiveBlackMs(room.clocks.blackRemainingMs || 0);
         return;
       }
-      
+
       const last = room.clocks.lastTickAt || now;
       const elapsed = Math.max(0, now - last);
       const whiteMs = (room.clocks.whiteRemainingMs || 0) - ((room.clocks.turn === 'white') ? elapsed : 0);
@@ -797,7 +797,12 @@ export default function Room() {
 
     const myPid = playerIdRef.current;
     const myColor = state && state.colors ? state.colors[myPid] : null;
+
+    console.log('Board render:', { myPid, myColor, colors: state?.colors, phase: state?.phase });
     const isMyTurnLocal = state && state.clocks && myColor && state.clocks.turn === myColor;
+
+    const orientation = myColor || (state?.phase === 'PLAYING' ? 'white' : 'white');
+    console.log('Board orientation:', orientation, 'myColor:', myColor, 'phase:', state?.phase);
 
     // compute legal targets for the currently selected square only for player whose turn
     let legalTargets = new Set();
