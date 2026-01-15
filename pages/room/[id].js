@@ -254,12 +254,17 @@ export default function Room() {
     wsRef.current.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+
         if (data.type === 'init' || data.type === 'update') {
           const room = data.room;
-          if (!room || !room.roomId || room.roomId !== backendId) {
-            setError('Room not found or invalid');
+          if (!room) return;
+
+          if (room.closed) {
+            setMessage('Start request expired — returning to lobby');
+            setTimeout(() => router.replace('/'), 3000);
             return;
           }
+
           setState(room);
           updateLocalGameAndClocks(room);
         }
@@ -268,6 +273,7 @@ export default function Room() {
       }
     };
 
+    
     wsRef.current.onclose = (event) => {
       if (event.code !== 1000) {
         setTimeout(setupWebSocket, 3000);
@@ -357,23 +363,16 @@ export default function Room() {
         }
         throw new Error('Failed to fetch state');
       }
+
       const data = await res.json();
       const room = data.room || data;
+
       if (!room || !room.roomId || room.roomId !== backendId) {
         setError('Room not found');
         return;
       }
 
-      if (data.startExpired) {
-        setMessage('Start request timed out — returning to lobby');
-        setTimeout(() => {
-          const playerName = localStorage.getItem('playerName') || getCookie('playerName') || name || '';
-          router.replace(`/?name=${encodeURIComponent(playerName)}`);
-        }, 2000);
-        return;
-      }
-
-      if (room.closed) {
+      if (data.startExpired || room.closed) {
         setMessage('Start request expired — returning to lobby');
         setTimeout(() => router.replace('/'), 3000);
         return;
@@ -384,11 +383,18 @@ export default function Room() {
 
       try {
         const savedPid = getStoredPlayerId();
-        const listed = savedPid && room.players && room.players.find(p => p.id === savedPid);
+        const listed =
+          savedPid &&
+          room.players &&
+          room.players.find(p => p.id === savedPid);
+
         if (savedPid && !listed && !rejoinAttemptedRef.current) {
           rejoinAttemptedRef.current = true;
-          const savedName = localStorage.getItem('playerName') || getCookie('playerName');
-          await autoJoin(savedPid, savedName || '');
+          const savedName =
+            localStorage.getItem('playerName') ||
+            getCookie('playerName') ||
+            '';
+          await autoJoin(savedPid, savedName);
         }
       } catch (e) {
         console.warn('Background rejoin attempt failed', e);
