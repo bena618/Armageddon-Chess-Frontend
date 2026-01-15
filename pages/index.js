@@ -12,6 +12,17 @@ export default function Home() {
   const autoJoinTimerRef = useRef(null);
   const autoJoinIntervalRef = useRef(null);
 
+
+  function getOrCreatePlayerId() {
+    if (typeof window === 'undefined') return crypto.randomUUID();
+    const existing = window.localStorage.getItem('playerId');
+    if (existing) return existing;
+    const fresh = crypto.randomUUID();
+    window.localStorage.setItem('playerId', fresh);
+    return fresh;
+  }
+
+
   // Pre-fill name from query param (e.g., from timeout redirect)
   useEffect(() => {
     const { name: queryName } = router.query;
@@ -33,7 +44,7 @@ export default function Home() {
       const pathId = window.location.pathname.split('/').filter(Boolean)[1];
       const backendId = pathId.startsWith('room-') ? pathId : `room-${pathId}`;
 
-      const playerId = crypto.randomUUID();
+      const playerId = getOrCreatePlayerId();
 
       try {
         const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
@@ -84,9 +95,8 @@ export default function Home() {
         return;
       }
 
-      const playerId = crypto.randomUUID();
+      const playerId = getOrCreatePlayerId();
       localStorage.setItem('playerName', name.trim());
-      localStorage.setItem('playerId', playerId);
 
       const displayId = roomId.replace(/^room-/, '');
       router.push(`/room/${displayId}`);
@@ -105,7 +115,7 @@ export default function Home() {
     }
     setLoading(true);
     try {
-      const playerId = crypto.randomUUID();
+      const playerId = getOrCreatePlayerId();
       const res = await fetch(`${BASE}/rooms/join-next`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -123,7 +133,7 @@ export default function Home() {
         return;
       }
       localStorage.setItem('playerName', name.trim());
-      localStorage.setItem('playerId', playerId);
+
       const displayId = room.roomId.replace(/^room-/, '');
       router.push(`/room/${displayId}`);
     } catch (e) {
