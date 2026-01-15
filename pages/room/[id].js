@@ -1080,21 +1080,63 @@ export default function Room() {
             </div>
           )}
 
+
           {(state?.phase === 'PLAYING' || state?.phase === 'FINISHED') && (
             <div>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <div>
-                  <p>Turn: {state.clocks ? state.clocks.turn : '—'}</p>
-                  <p>White: {liveWhiteMs !== null ? Math.ceil(liveWhiteMs/1000) + 's' : (state.clocks ? Math.max(0, Math.floor((state.clocks.whiteRemainingMs || 0) / 1000)) + 's' : '—')}</p>
-                  <p>Black: {liveBlackMs !== null ? Math.ceil(liveBlackMs/1000) + 's' : (state.clocks ? Math.max(0, Math.floor((state.clocks.blackRemainingMs || 0) / 1000)) + 's' : '—')}</p>
-                </div>
-                <div>
-                  <div style={{ width: 360 }}>
-                    <Board fen={boardFen === 'start' ? 'start' : boardFen} />
-                  </div>
+              <div style={{ 
+                textAlign: 'center',
+                fontSize: 20, 
+                fontWeight: 'bold', 
+                marginBottom: 12,
+                color: state.clocks?.turn === 'white' ? '#f0d9b5' : '#b58863',
+                textShadow: '1px 1px 2px rgba(0,0,0,0.5)'
+              }}>
+                Turn: {state.clocks ? state.clocks.turn.toUpperCase() : '—'}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <div style={{ 
+                  width: 440, 
+                  padding: '8px', 
+                  background: '#f0f0f0', 
+                  borderRadius: 8,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                }}>
+                  <Board fen={boardFen === 'start' ? 'start' : boardFen} />
                 </div>
               </div>
-              <div style={{ marginTop: 8 }}>
+
+              <div style={{ 
+                display: 'flex', 
+                gap: 24, 
+                marginTop: 16,
+                justifyContent: 'center'
+              }}>
+                <div style={{
+                  fontWeight: 'bold',
+                  color: '#fff',
+                  background: '#b58863',
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  minWidth: 100,
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                }}>
+                  White: {liveWhiteMs !== null ? Math.ceil(liveWhiteMs/1000) + 's' : (state.clocks ? Math.max(0, Math.floor((state.clocks.whiteRemainingMs || 0) / 1000)) + 's' : '—')}
+                </div>
+                <div style={{
+                  fontWeight: 'bold',
+                  color: '#000',
+                  background: '#f0d9b5',
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  minWidth: 100,
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                }}>
+                  Black: {liveBlackMs !== null ? Math.ceil(liveBlackMs/1000) + 's' : (state.clocks ? Math.max(0, Math.floor((state.clocks.blackRemainingMs || 0) / 1000)) + 's' : '—')}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 16 }}>
                 <strong>Moves:</strong>
                 <pre>{JSON.stringify(state.moves || [], null, 2)}</pre>
               </div>
@@ -1106,17 +1148,17 @@ export default function Room() {
               </div>
 
               {state?.phase === 'FINISHED' && (
-                <div style={{ marginTop: 12, padding: 8, border: '1px solid #ddd', background: '#f7fff7' }}>
-                    <div style={{ marginBottom: 8 }}>
-                      <strong>Result:</strong>{' '}
-                      {state.result === 'draw'
-                        ? `Draw${state.reason ? ` (${state.reason})` : ''}`
-                        : (gameOverInfo
-                            ? `${gameOverInfo.winnerName || gameOverInfo.winnerId || gameOverInfo.color} (${gameOverInfo.color || 'winner'}) wins`
-                            : (state.winnerId
-                                ? (state.players.find(p => p.id === state.winnerId)?.name || state.winnerId) + ' wins'
-                                : 'Game finished'))}
-                    </div>
+                <div style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', background: '#f7fff7', borderRadius: 8 }}>
+                  <div style={{ marginBottom: 16 }}>
+                    <strong>Result:</strong>{' '}
+                    {state.result === 'draw'
+                      ? `Draw${state.reason ? ` (${state.reason})` : ''}`
+                      : (gameOverInfo
+                          ? `${gameOverInfo.winnerName || gameOverInfo.winnerId || gameOverInfo.color} (${gameOverInfo.color || 'winner'}) wins`
+                          : (state.winnerId
+                              ? (state.players.find(p => p.id === state.winnerId)?.name || state.winnerId) + ' wins'
+                              : 'Game finished'))}
+                  </div>
                   {state?.rematchWindowEnds ? (
                     <div>
                       <div style={{ marginBottom: 8 }}>Rematch voting open — ends in <em><LiveTimer deadline={state.rematchWindowEnds} /></em></div>
