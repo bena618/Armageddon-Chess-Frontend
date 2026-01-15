@@ -373,6 +373,12 @@ export default function Room() {
         return;
       }
 
+      if (room.closed) {
+        setMessage('Start request expired — returning to lobby');
+        setTimeout(() => router.replace('/'), 3000);
+        return;
+      }
+
       updateLocalGameAndClocks(room);
       setState(room);
 
