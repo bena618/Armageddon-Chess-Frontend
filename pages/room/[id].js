@@ -345,8 +345,15 @@ export default function Room() {
       }
     }
 
-    if (room.clocks) {
-      const now = Date.now();
+      if (room.clocks) {
+        const now = Date.now();
+
+      if (room.phase === 'FINISHED' && room.clocks.frozenAt) {
+        setLiveWhiteMs(room.clocks.whiteRemainingMs || 0);
+        setLiveBlackMs(room.clocks.blackRemainingMs || 0);
+        return;
+      }
+      
       const last = room.clocks.lastTickAt || now;
       const elapsed = Math.max(0, now - last);
       const whiteMs = (room.clocks.whiteRemainingMs || 0) - ((room.clocks.turn === 'white') ? elapsed : 0);
