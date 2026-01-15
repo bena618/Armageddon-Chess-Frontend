@@ -374,10 +374,17 @@ export default function Room() {
 
       if (data.startExpired || room.closed) {
         setMessage('Start request expired — returning to lobby');
-        setTimeout(() => router.replace('/'), 3000);
+        setTimeout(() => {
+          const playerName =
+            localStorage.getItem('playerName') ||
+            getCookie('playerName') ||
+            name ||
+            '';
+          router.replace(`/?name=${encodeURIComponent(playerName)}`);
+        }, 2000);
         return;
       }
-
+      
       updateLocalGameAndClocks(room);
       setState(room);
 
