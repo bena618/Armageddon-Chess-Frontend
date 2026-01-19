@@ -160,9 +160,9 @@ export default function RoomIndex() {
             {state
               ? JSON.stringify(
                   {
-                    phase: state.phase,
-                    players: state.players,
-                    bids: state.bids ? Object.keys(state.bids) : [],
+                    phase: state?.phase,
+                    players: state?.players,
+                    bids: state?.bids ? Object.keys(state.bids) : [],
                   },
                   null,
                   2

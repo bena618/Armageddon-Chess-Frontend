@@ -526,12 +526,12 @@ export default function Room() {
       setLiveWhiteMs(safeWhite);
       setLiveBlackMs(safeBlack);
 
-      if (state.phase === 'PLAYING' && !gameOverInfo) {
-        if (safeWhite <= 0 && (!state.winnerId)) {
-          const winner = state.players.find(p => state.colors && state.colors[p.id] === 'black');
+      if (state?.phase === 'PLAYING' && !gameOverInfo) {
+        if (safeWhite <= 0 && (!state?.winnerId)) {
+          const winner = state?.players?.find(p => state?.colors?.[p.id] === 'black');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
-        } else if (safeBlack <= 0 && (!state.winnerId)) {
-          const winner = state.players.find(p => state.colors && state.colors[p.id] === 'white');
+        } else if (safeBlack <= 0 && (!state?.winnerId)) {
+          const winner = state?.players?.find(p => state?.colors?.[p.id] === 'white');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
         }
       }
@@ -664,7 +664,7 @@ export default function Room() {
     const to = uci.slice(2,4);
     const finalUci = promotion ? `${from}${to}${promotion}` : uci;
 
-    const playerColor = state && state.colors ? state.colors[playerId] : null;
+    const playerColor = state?.colors?.[playerId] ?? null;
     if (!playerColor) { setError('Unknown player color'); return false; }
     const turnLetter = game.turn() === 'w' ? 'white' : 'black';
     if (turnLetter !== playerColor) { setError('Not your turn'); return false; }
@@ -708,8 +708,8 @@ export default function Room() {
     if (isGameOver) {
       const turnAfter = game.turn();
       const winnerColor = turnAfter === 'w' ? 'black' : 'white';
-      const winnerId = state && state.colors ? Object.keys(state.colors).find(id => state.colors[id] === winnerColor) : null;
-      const winnerName = state && state.players ? (state.players.find(p => p.id === winnerId)?.name || null) : null;
+      const winnerId = state?.colors ? Object.keys(state.colors).find(id => state.colors[id] === winnerColor) : null;
+      const winnerName = state?.players ? (state.players.find(p => p.id === winnerId)?.name || null) : null;
       setGameOverInfo({ winnerId, winnerName, color: winnerColor });
     }
 
@@ -734,8 +734,8 @@ export default function Room() {
           setMessage(`Draw${data.reason ? ` (${data.reason})` : ''}`);
         } else if (data.result === 'checkmate' || data.result === 'time_forfeit') {
           const winnerId = data.winnerId || null;
-          const winner = state && state.players ? state.players.find(p => p.id === winnerId) : null;
-          const color = state && state.colors && winnerId ? state.colors[winnerId] : null;
+          const winner = state?.players?.find(p => p.id === winnerId);
+          const color = state?.colors?.[winnerId] ?? null;
           setGameOverInfo({ winnerId, winnerName: winner ? winner.name : null, color });
           setMessage(
             data.result === 'checkmate'
@@ -796,8 +796,8 @@ export default function Room() {
       : fenToMatrix(fen);
 
     const myPid = playerIdRef.current;
-    const myColor = state && state.colors ? state.colors[myPid] : null;
-    const isMyTurnLocal = state && state.clocks && myColor && state.clocks.turn === myColor;
+    const myColor = state?.colors?.[myPid] ?? null;
+    const isMyTurnLocal = state?.clocks && myColor && state.clocks.turn === myColor;
 
     let legalTargets = new Set();
     try {
@@ -913,7 +913,7 @@ export default function Room() {
   }
 
   const playerId = playerIdRef.current;
-  const amIWinner = state.winnerId && playerId === state.winnerId;
+  const amIWinner = state?.winnerId && playerId === state.winnerId;
   const myColor = state.colors?.[playerId] ?? null;
   const isMyTurn = state.clocks && myColor && state.clocks.turn === myColor;
 
@@ -979,13 +979,13 @@ export default function Room() {
           {typeof window !== 'undefined' && window.location.search.includes('debug=1') ? (
             <div style={{ padding: 8, marginBottom: 8, border: '1px dashed #888', background: '#f7f7ff' }}>
               <strong>Debug:</strong>
-              <div>startRequestedBy: {String(state.startRequestedBy || 'null')}</div>
-              <div>startConfirmDeadline: {state.startConfirmDeadline ? new Date(state.startConfirmDeadline).toLocaleString() : 'null'}</div>
-              <div>choiceDurationMs: {String(state.choiceDurationMs || 'null')}</div>
-              <div>closed: {String(!!state.closed)}</div>
+              <div>startRequestedBy: {String(state?.startRequestedBy || 'null')}</div>
+              <div>startConfirmDeadline: {state?.startConfirmDeadline ? new Date(state.startConfirmDeadline).toLocaleString() : 'null'}</div>
+              <div>choiceDurationMs: {String(state?.choiceDurationMs || 'null')}</div>
+              <div>closed: {String(!!state?.closed)}</div>
               <div>
-                remainingMs: {state.startConfirmDeadline ? Math.max(0, state.startConfirmDeadline - Date.now()) : '—'}
-                {state.startConfirmDeadline && state.choiceDurationMs ? (' — pct: ' + Math.round(Math.max(0, Math.min(100, ((Math.max(0, state.startConfirmDeadline - Date.now()) / state.choiceDurationMs) * 100))))) + '%' : ''}
+                remainingMs: {state?.startConfirmDeadline ? Math.max(0, state.startConfirmDeadline - Date.now()) : '—'}
+                {state?.startConfirmDeadline && state?.choiceDurationMs ? (' — pct: ' + Math.round(Math.max(0, Math.min(100, ((Math.max(0, state.startConfirmDeadline - Date.now()) / state.choiceDurationMs) * 100))))) + '%' : ''}
               </div>
             </div>
           ) : null}
@@ -1006,10 +1006,10 @@ export default function Room() {
               {state?.startRequestedBy ? (
                 <div style={{ marginBottom: 8, padding: 8, border: '1px solid #ccc', background: '#fff8e6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    {state.startRequestedBy === playerIdRef.current ? (
+                    {state?.startRequestedBy === playerIdRef.current ? (
                       <div>You requested bidding — waiting for opponent confirmation</div>
                     ) : (
-                      <div>{(state.players.find(p => p.id === state.startRequestedBy)?.name) || state.startRequestedBy} requested bidding — click <strong>Start Bidding</strong> to confirm</div>
+                      <div>{(state?.players.find(p => p.id === state?.startRequestedBy)?.name) || state?.startRequestedBy} requested bidding — click <strong>Start Bidding</strong> to confirm</div>
                     )}
                     <div style={{ fontSize: '14px', color: '#666', marginTop: 4 }}>
                       Both players return to lobby if no confirmation in:
@@ -1017,14 +1017,14 @@ export default function Room() {
                   </div>
                   <div>
                     <Countdown 
-                      deadline={state.startConfirmDeadline} 
-                      totalMs={state.choiceDurationMs} 
+                      deadline={state?.startConfirmDeadline} 
+                      totalMs={state?.choiceDurationMs} 
                       onExpire={() => setMessage('Returning to lobby')} />
                   </div>
                 </div>
               ) : null}
               <button onClick={startBidding} disabled={state?.players?.length < state?.maxPlayers}>
-                {state?.startRequestedBy && state.startRequestedBy !== playerIdRef.current ? 'Confirm Start' : 'Start Bidding'}
+                {state?.startRequestedBy && state?.startRequestedBy !== playerIdRef.current ? 'Confirm Start' : 'Start Bidding'}
               </button>
             </div>
           )}
@@ -1034,12 +1034,12 @@ export default function Room() {
               <p>Bid deadline: {state?.bidDeadline ? <><LiveTimer deadline={state.bidDeadline} format="mm:ss" /> ({new Date(state.bidDeadline).toLocaleTimeString()})</> : '—'}</p>
               <p>Existing bids:</p>
               <ul>
-                {state.players.map(p => {
-                  const hasBid = state.bids && state.bids[p.id];
-                  if (state.phase === 'BIDDING') {
+                {state?.players?.map(p => {
+                  const hasBid = state?.bids && state?.bids[p.id];
+                  if (state?.phase === 'BIDDING') {
                     return <li key={p.id}>{p.name || p.id}: {hasBid ? 'Submitted' : (p.id === playerId ? 'You — not submitted' : '—')}</li>;
                   }
-                  const amt = hasBid && typeof state.bids[p.id].amount === 'number' ? state.bids[p.id].amount : null;
+                  const amt = hasBid && typeof state?.bids?.[p.id]?.amount === 'number' ? state?.bids[p.id].amount : null;
                   return <li key={p.id}>{p.name || p.id}: {amt ? formatMs(amt) : '—'}</li>;
                 })}
               </ul>
@@ -1059,23 +1059,23 @@ export default function Room() {
             </div>
           )}
 
-          {state.phase === 'COLOR_PICK' && (
+          {state?.phase === 'COLOR_PICK' && (
             <div>
               <p>Winner: {(state?.players?.find(p => p.id === state?.winnerId)?.name) || state?.winnerId || '—'}</p>
               <p>Current picker: {state?.currentPicker || '—'}</p>
               {(() => {
-                const canChoose = (state.currentPicker === 'winner' && playerId === state.winnerId) || (state.currentPicker === 'loser' && playerId === state.loserId);
+                const canChoose = (state?.currentPicker === 'winner' && playerId === state?.winnerId) || (state?.currentPicker === 'loser' && playerId === state?.loserId);
                 if (canChoose) {
                   return (
                     <div>
                       <p>Choose color (black receives draw odds):</p>
                       <button onClick={() => chooseColor('white')}>White</button>
                       <button onClick={() => chooseColor('black')}>Black</button>
-                      <p>Time remaining to choose: {state.choiceDeadline ? <LiveTimer deadline={state.choiceDeadline} /> : '—'}</p>
+                      <p>Time remaining to choose: {state?.choiceDeadline ? <LiveTimer deadline={state.choiceDeadline} /> : '—'}</p>
                     </div>
                   );
                 }
-                return <p>Waiting for {state.currentPicker} to choose a color...</p>;
+                return <p>Waiting for {state?.currentPicker} to choose a color...</p>;
               })()}
             </div>
           )}
@@ -1138,7 +1138,7 @@ export default function Room() {
 
               <div style={{ marginTop: 16 }}>
                 <strong>Moves:</strong>
-                <pre>{JSON.stringify(state.moves || [], null, 2)}</pre>
+                <pre>{JSON.stringify(state?.moves || [], null, 2)}</pre>
               </div>
               <div style={{ marginTop: 8 }}>
                 <strong>FEN:</strong>
@@ -1151,23 +1151,23 @@ export default function Room() {
                 <div style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', background: '#f7fff7', borderRadius: 8 }}>
                   <div style={{ marginBottom: 16 }}>
                     <strong>Result:</strong>{' '}
-                    {state.result === 'draw'
-                      ? `Draw${state.reason ? ` (${state.reason})` : ''}`
+                    {state?.result === 'draw'
+                      ? `Draw${state?.reason ? ` (${state.reason})` : ''}`
                       : (gameOverInfo
                           ? `${gameOverInfo.winnerName || gameOverInfo.winnerId || gameOverInfo.color} (${gameOverInfo.color || 'winner'}) wins`
-                          : (state.winnerId
-                              ? (state.players.find(p => p.id === state.winnerId)?.name || state.winnerId) + ' wins'
+                          : (state?.winnerId
+                              ? (state?.players?.find(p => p.id === state.winnerId)?.name || state.winnerId) + ' wins'
                               : 'Game finished'))}
                   </div>
                   {state?.rematchWindowEnds ? (
                     <div>
                       <div style={{ marginBottom: 8 }}>Rematch voting open — ends in <em><LiveTimer deadline={state.rematchWindowEnds} /></em></div>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={() => sendRematchVote(true)} disabled={state.rematchVotes && state.rematchVotes[playerIdRef.current] === true}>Vote Yes</button>
-                        <button onClick={() => sendRematchVote(false)} disabled={state.rematchVotes && state.rematchVotes[playerIdRef.current] === false}>Vote No</button>
+                        <button onClick={() => sendRematchVote(true)} disabled={state?.rematchVotes && state.rematchVotes[playerIdRef.current] === true}>Vote Yes</button>
+                        <button onClick={() => sendRematchVote(false)} disabled={state?.rematchVotes && state.rematchVotes[playerIdRef.current] === false}>Vote No</button>
                       </div>
                       <div style={{ marginTop: 8 }}>
-                        Votes: {state.players.map(p => `${p.name || p.id}: ${state.rematchVotes && typeof state.rematchVotes[p.id] !== 'undefined' ? (state.rematchVotes[p.id] ? 'Yes' : 'No') : '—'}`).join(' | ')}
+                        Votes: {state?.players?.map(p => `${p.name || p.id}: ${state?.rematchVotes && typeof state.rematchVotes[p.id] !== 'undefined' ? (state.rematchVotes[p.id] ? 'Yes' : 'No') : '—'}`).join(' | ')}
                       </div>
                     </div>
                   ) : (
