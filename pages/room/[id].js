@@ -822,7 +822,7 @@ export default function Room() {
         // Show promotion modal instead of auto-queening
         setPendingPromotion({ source, target, piece });
         setShowPromotionModal(true);
-        return false; // Prevent the move until promotion is chosen
+        return false; 
       }
 
       if (!ChessJS) return false;
@@ -840,6 +840,7 @@ export default function Room() {
         localGameRef.current = game;
         setBoardFen(game.fen());
         setPgn(game.pgn());
+        setPosition(game.fen()); // Update position for react-chessboard
         
         // Fire network request in background (don't wait)
         makeMoveUci(source + target).catch(e => {
@@ -875,6 +876,7 @@ export default function Room() {
         localGameRef.current = game;
         setBoardFen(game.fen());
         setPgn(game.pgn());
+        setPosition(game.fen()); // Update position for react-chessboard
         
         // Fire network request in background (don't wait)
         makeMoveUci(source + target + promotionPiece, promotionPiece).catch(e => {
