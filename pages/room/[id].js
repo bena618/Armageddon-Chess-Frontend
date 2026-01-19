@@ -999,19 +999,44 @@ export default function Room() {
 
     return (
       <>
-        <Chessboard
-          position={position}
-          onPieceDrop={onDrop}
-          onSquareClick={onSquareClick}
-          onSquareRightClick={onSquareRightClick}
-          onPieceDragBegin={onPieceDragBegin}
-          boardWidth={360}
-          arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
-          customDarkSquareStyle={{ backgroundColor: '#b58863' }}
-          customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
-          customSquareStyles={customSquareStyles}
-          animationDuration={300}
-        />
+        <div 
+          onClick={(e) => {
+            // Try to capture clicks on the board container
+            console.log('Board container clicked');
+            const boardElement = e.currentTarget;
+            const rect = boardElement.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            console.log('Click position:', x, y);
+            
+            // Try to calculate square from position (approximate)
+            const squareSize = 360 / 8; // 45px per square
+            const file = Math.floor(x / squareSize);
+            const rank = 7 - Math.floor(y / squareSize); // Invert Y for chess notation
+            const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+            const square = files[file] + (rank + 1);
+            
+            if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
+              console.log('Calculated square:', square);
+              // Call the original handler
+              onSquareClick(square);
+            }
+          }}
+          style={{ display: 'inline-block' }}
+        >
+          <Chessboard
+            position={position}
+            onPieceDrop={onDrop}
+            onSquareRightClick={onSquareRightClick}
+            onPieceDragBegin={onPieceDragBegin}
+            boardWidth={360}
+            arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
+            customDarkSquareStyle={{ backgroundColor: '#b58863' }}
+            customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
+            customSquareStyles={customSquareStyles}
+            animationDuration={300}
+          />
+        </div>
 
         {showPromotionModal && (
           <div style={{
@@ -1052,25 +1077,6 @@ export default function Room() {
         )}
       </>
     );
-  }
-
-  function formatMs(ms) {
-    if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—';
-    const totalSec = Math.max(0, Math.floor(ms / 1000));
-    const mins = Math.floor(totalSec / 60);
-    const secs = totalSec % 60;
-    const parts = [];
-    if (mins > 0) parts.push(`${mins} minute${mins === 1 ? '' : 's'}`);
-    parts.push(`${secs} second${secs === 1 ? '' : 's'}`);
-    return parts.join(' ');
-  }
-
-  if (typeof window === 'undefined') {
-      return null;
-  }
-
-  if (!roomIdRef.current && !roomId) {
-    return <div className="container">Loading room...</div>;
   }
 
   if (loading || joining || !state) {
