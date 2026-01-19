@@ -759,97 +759,86 @@ export default function Room() {
     const [showPromotionModal, setShowPromotionModal] = useState(false);
     const [pendingPromotion, setPendingPromotion] = useState(null);
 
-    // Sync position with fen prop and track last move
+    // Sync position when fen prop changes (from backend)
     useEffect(() => {
-      setPosition(fen || 'start');
+      if (fen && fen !== position) {
+        setPosition(fen);
+      }
     }, [fen]);
 
-    // Play move sound function
-    function playMoveSound() {
-      if (typeof window !== 'undefined' && window.Audio) {
-        try {
-          // Create a simple move sound using Web Audio API
-          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-          const oscillator = audioContext.createOscillator();
-          const gainNode = audioContext.createGain();
-          
-          oscillator.connect(gainNode);
-          gainNode.connect(audioContext.destination);
-          
-          oscillator.frequency.value = 800;
-          oscillator.type = 'sine';
-          gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
-          
-          oscillator.start(audioContext.currentTime);
-          oscillator.stop(audioContext.currentTime + 0.1);
-        } catch (e) {
-          console.log('Could not play sound:', e);
-        }
-      }
-    }
-
-    // Extract last move from moves array
+    // Track last move for highlighting
     useEffect(() => {
-      if (state?.moves && state.moves.length > 0) {
-        const lastMoveData = state.moves[state.moves.length - 1];
-        if (lastMoveData && lastMoveData.uci) {
-          const from = lastMoveData.uci.slice(0, 2);
-          const to = lastMoveData.uci.slice(2, 4);
+      if (state?.moves?.length > 0) {
+        const last = state.moves[state.moves.length - 1];
+        if (last?.move?.length >= 4) {
+          const from = last.move.slice(0, 2);
+          const to = last.move.slice(2, 4);
           setLastMove([from, to]);
         }
       }
     }, [state?.moves]);
 
-    // Custom square styles for last move highlighting
     const customSquareStyles = {};
-    if (lastMove && lastMove.length === 2) {
-      customSquareStyles[lastMove[0]] = {
-        backgroundColor: 'rgba(255, 255, 0, 0.3)',
-        border: '2px solid #f39c12'
-      };
-      customSquareStyles[lastMove[1]] = {
-        backgroundColor: 'rgba(255, 255, 0, 0.3)',
-        border: '2px solid #f39c12'
-      };
+    if (lastMove?.length === 2) {
+      customSquareStyles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
+      customSquareStyles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
+    }
+
+    function playMoveSound() {
+      if (typeof window !== 'undefined' && window.Audio) {
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.value = 800;
+          osc.type = 'sine';
+          gain.gain.setValueAtTime(0.3, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.1);
+        } catch (e) {}
+      }
     }
 
     function onDrop(source, target, piece) {
+      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
+      if (!playerColor) return false;
+
+      const game = localGameRef.current || new ChessJS();
+      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+      if (turnLetter !== playerColor) return false; // Not your turn
+
       const isPawn = piece[1].toLowerCase() === 'p';
       const isPromotion = isPawn && (target[1] === '8' || target[1] === '1');
 
       if (isPromotion) {
-        // Show promotion modal instead of auto-queening
-        setPendingPromotion({ source, target, piece });
+        setPendingPromotion({ source, target });
         setShowPromotionModal(true);
-        return false; 
+        return false; // Wait for modal choice
       }
 
-      if (!ChessJS) return false;
-      const game = localGameRef.current || new ChessJS();
-      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
-      
-      if (turnLetter !== playerColor) return false; // Not your turn
-      
+      // Normal move - optimistic update
       try {
         const moved = game.move({ from: source, to: target });
         if (!moved) return false;
-        
-        // Update local state immediately
+
+        // Accept locally immediately
         localGameRef.current = game;
+        setPosition(game.fen());
         setBoardFen(game.fen());
         setPgn(game.pgn());
-        setPosition(game.fen()); // Update position for react-chessboard
-        
-        // Fire network request in background (don't wait)
+        playMoveSound();
+
+        // Send to server in background
         makeMoveUci(source + target).catch(e => {
           console.error('Move sync failed:', e);
-          // Optionally revert local state on failure
+          // Optional: revert position on failure
+          setPosition(fen || 'start');
         });
-        
-        playMoveSound();
-        return true; // Accept move locally
+
+        return true;
       } catch (e) {
         return false;
       }
@@ -857,34 +846,28 @@ export default function Room() {
 
     function handlePromotion(promotionPiece) {
       if (!pendingPromotion) return;
-      
+
       const { source, target } = pendingPromotion;
-      
-      // Chess.js validation FIRST (sync), network call AFTER
-      if (!ChessJS) return;
-      const game = localGameRef.current || new ChessJS();
-      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
-      
-      if (turnLetter !== playerColor) return; // Not your turn
-      
+      const uci = source + target + promotionPiece;
+
       try {
+        const game = localGameRef.current || new ChessJS();
         const moved = game.move({ from: source, to: target, promotion: promotionPiece });
         if (!moved) return;
-        
-        // Update local state immediately
+
+        // Accept locally
         localGameRef.current = game;
+        setPosition(game.fen());
         setBoardFen(game.fen());
         setPgn(game.pgn());
-        setPosition(game.fen()); // Update position for react-chessboard
-        
-        // Fire network request in background (don't wait)
-        makeMoveUci(source + target + promotionPiece, promotionPiece).catch(e => {
-          console.error('Promotion sync failed:', e);
-          // Optionally revert local state on failure
-        });
-        
         playMoveSound();
+
+        // Send to server
+        makeMoveUci(uci, promotionPiece).catch(e => {
+          console.error('Promotion sync failed:', e);
+          setPosition(fen || 'start');
+        });
+
         setShowPromotionModal(false);
         setPendingPromotion(null);
       } catch (e) {
@@ -898,92 +881,47 @@ export default function Room() {
           position={position}
           onPieceDrop={onDrop}
           boardWidth={360}
-          arePiecesDraggable={state?.clocks?.turn === state?.colors?.[playerIdRef.current]}
+          arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
           customDarkSquareStyle={{ backgroundColor: '#b58863' }}
           customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
           customSquareStyles={customSquareStyles}
-          animationDuration={300} // Smooth piece movement animations
+          animationDuration={300}
         />
-        
+
         {showPromotionModal && (
           <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
           }}>
             <div style={{
-              backgroundColor: 'white',
-              padding: '20px',
-              borderRadius: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              textAlign: 'center'
+              background: 'white', padding: '24px', borderRadius: '12px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)', textAlign: 'center'
             }}>
-              <h3>Choose promotion piece:</h3>
-              <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                <button 
-                  onClick={() => handlePromotion('q')}
-                  style={{
-                    padding: '10px 20px',
-                    fontSize: '16px',
-                    cursor: 'pointer',
-                    backgroundColor: '#007bff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px'
-                  }}
-                >
-                  ♕ Queen
-                </button>
-                <button 
-                  onClick={() => handlePromotion('r')}
-                  style={{
-                    padding: '10px 20px',
-                    fontSize: '16px',
-                    cursor: 'pointer',
-                    backgroundColor: '#28a745',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px'
-                  }}
-                >
-                  ♜ Rook
-                </button>
-                <button 
-                  onClick={() => handlePromotion('b')}
-                  style={{
-                    padding: '10px 20px',
-                    fontSize: '16px',
-                    cursor: 'pointer',
-                    backgroundColor: '#ffc107',
-                    color: 'black',
-                    border: 'none',
-                    borderRadius: '4px'
-                  }}
-                >
-                  ♗ Bishop
-                </button>
-                <button 
-                  onClick={() => handlePromotion('n')}
-                  style={{
-                    padding: '10px 20px',
-                    fontSize: '16px',
-                    cursor: 'pointer',
-                    backgroundColor: '#dc3545',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px'
-                  }}
-                >
-                  ♘ Knight
-                </button>
+              <h3 style={{ margin: '0 0 16px' }}>Promote pawn to:</h3>
+              <div style={{ display: 'flex', gap: '16px' }}>
+                {['q', 'r', 'b', 'n'].map(p => (
+                  <button
+                    key={p}
+                    onClick={() => handlePromotion(p)}
+                    style={{
+                      fontSize: '40px', padding: '12px 24px',
+                      background: '#f8f9fa', border: '1px solid #ccc',
+                      borderRadius: '8px', cursor: 'pointer', minWidth: '80px'
+                    }}
+                  >
+                    {p === 'q' ? '♕' : p === 'r' ? '♜' : p === 'b' ? '♝' : '♞'}
+                  </button>
+                ))}
               </div>
+              <button
+                onClick={() => {
+                  setShowPromotionModal(false);
+                  setPendingPromotion(null);
+                }}
+                style={{ marginTop: '16px', padding: '8px 16px' }}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         )}
