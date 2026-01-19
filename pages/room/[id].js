@@ -1,5 +1,6 @@
 import { useRouter } from 'next/router';
 import { useEffect, useState, useRef } from 'react';
+import { Chessboard } from 'react-chessboard';
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
@@ -752,140 +753,35 @@ export default function Room() {
     }
   }
 
-  const pieceMap = {
-    'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚',
-    'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
-  };
-
-  // Render pieces as SVGs for crisper visuals and easier styling
-  const pieceUnicodeMap = {
-    'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚',
-    'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔'
-  };
-
-  function Piece({ piece }) {
-    const glyph = pieceUnicodeMap[piece] || '';
-    const isWhite = piece === piece.toUpperCase();
-    return (
-      <svg width="36" height="36" viewBox="0 0 36 36" style={{ display: 'block' }}>
-        <rect x="0" y="0" width="36" height="36" fill="transparent" />
-        <text x="50%" y="50%" dominantBaseline="middle" textAnchor="middle" fontSize="24" style={{ fill: isWhite ? '#fff' : '#111', stroke: isWhite ? '#111' : '#fff', strokeWidth: 0.5, fontFamily: 'serif' }}>{glyph}</text>
-      </svg>
-    );
-  }
-
-  function fenToMatrix(fen) {
-    const rows = fen.split(' ')[0].split('/');
-    return rows.map(r => {
-      const arr = [];
-      for (const ch of r) {
-        if (/[1-8]/.test(ch)) {
-          const n = Number(ch);
-          for (let i=0;i<n;i++) arr.push(null);
-        } else arr.push(ch);
-      }
-      return arr;
-    });
-  }
-
-  const [selected, setSelected] = useState(null);
-
   function Board({ fen }) {
-    const matrix = fen === 'start'
-      ? fenToMatrix('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR')
-      : fenToMatrix(fen);
+    const [position, setPosition] = useState(fen || 'start');
 
-    const myPid = playerIdRef.current;
-    const myColor = state?.colors?.[myPid] ?? null;
-    const isMyTurnLocal = state?.clocks && myColor && state.clocks.turn === myColor;
+    useEffect(() => {
+      setPosition(fen || 'start');
+    }, [fen]);
 
-    let legalTargets = new Set();
-    try {
-      if (isMyTurnLocal && selected && ChessJS && localGameRef.current) {
-        const g = new ChessJS(localGameRef.current.fen());
-        const moves = g.moves({ square: selected, verbose: true }) || [];
-        for (const m of moves) legalTargets.add(m.to);
-      }
-    } catch (e) {}
+    function onDrop(source, target, piece) {
+      const promotion = piece[1].toLowerCase() === 'p' && (target[1] === '8' || target[1] === '1')
+        ? 'q'  // auto-queen for simplicity, or trigger your promotion modal
+        : undefined;
 
-    const squares = [];
-
-    for (let displayRow = 0; displayRow < 8; displayRow++) {
-      for (let displayCol = 0; displayCol < 8; displayCol++) {
-        // Map display coordinates back to FEN matrix coordinates
-        const rIdx = myColor === 'black' ? 7 - displayRow : displayRow;
-        const cIdx = myColor === 'black' ? 7 - displayCol : displayCol;
-        
-        const cell = matrix[rIdx][cIdx];
-
-        // Square name from display perspective
-        const rank = myColor === 'black' ? (8 - displayRow) : (displayRow + 1);
-        const fileIndex = myColor === 'black' ? displayCol : (7 - displayCol);
-        const file = 'abcdefgh'[fileIndex];
-        const sq = `${file}${rank}`;
-
-        const isLight = (displayRow + displayCol) % 2 === 0;
-        const baseColor = isLight ? '#f0d9b5' : '#b58863';
-        const isSelected = selected === sq;
-        const isTarget = legalTargets.has(sq);
-        const bg = isSelected ? '#ffeb99' : (isTarget ? '#9fe29f' : baseColor);
-
-        squares.push(
-          <div
-            key={sq}
-            onClick={() => {
-              if (!isMyTurnLocal) { setMessage('Not your turn'); return; }
-              if (!selected) { setSelected(sq); }
-              else {
-                const uci = `${selected}${sq}`;
-                setSelected(null);
-                makeMoveUci(uci);
-              }
-            }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              const from = e.dataTransfer.getData('text/from');
-              if (from) {
-                const uci = `${from}${sq}`;
-                setSelected(null);
-                makeMoveUci(uci);
-              }
-            }}
-            style={{
-              width: 54, height: 54, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', background: bg, cursor: 'pointer',
-              fontSize: 28, boxSizing: 'border-box',
-              border: isSelected ? '2px solid #f39c12' : '1px solid rgba(0,0,0,0.15)'
-            }}
-          >
-            {cell ? (
-              <div
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('text/from', sq);
-                  try { e.dataTransfer.setDragImage(e.currentTarget, 16, 16); } catch (e) {}
-                }}
-                style={{ cursor: 'grab', userSelect: 'none' }}
-              >
-                <Piece piece={cell} />
-              </div>
-            ) : ''}
-          </div>
-        );
-      }
+      const uci = source + target + (promotion || '');
+      const success = makeMoveUci(uci, promotion); // your existing function — returns true if success
+      return success;
     }
 
     return (
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(8,54px)', gap: 0,
-        border: '2px solid #222', boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
-      }}>
-        {squares}
-      </div>
+      <Chessboard
+        position={position}
+        onPieceDrop={onDrop}
+        boardWidth={360} // same as your current size
+        arePiecesDraggable={!!(state?.clocks?.turn === (state?.colors?.[playerIdRef.current]))} // only your turn
+        customDarkSquareStyle={{ backgroundColor: '#b58863' }}
+        customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
+        // optional: last move highlight, arrows, etc.
+      />
     );
   }
-
-
 
   function formatMs(ms) {
     if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—';
