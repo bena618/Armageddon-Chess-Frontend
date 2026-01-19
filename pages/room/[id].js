@@ -825,25 +825,68 @@ export default function Room() {
         return false; // Prevent the move until promotion is chosen
       }
 
-      const uci = source + target;
-      const success = makeMoveUci(uci);
-      if (success) {
+      if (!ChessJS) return false;
+      const game = localGameRef.current || new ChessJS();
+      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
+      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+      
+      if (turnLetter !== playerColor) return false; // Not your turn
+      
+      try {
+        const moved = game.move({ from: source, to: target });
+        if (!moved) return false;
+        
+        // Update local state immediately
+        localGameRef.current = game;
+        setBoardFen(game.fen());
+        setPgn(game.pgn());
+        
+        // Fire network request in background (don't wait)
+        makeMoveUci(source + target).catch(e => {
+          console.error('Move sync failed:', e);
+          // Optionally revert local state on failure
+        });
+        
         playMoveSound();
+        return true; // Accept move locally
+      } catch (e) {
+        return false;
       }
-      return success;
     }
 
     function handlePromotion(promotionPiece) {
       if (!pendingPromotion) return;
       
       const { source, target } = pendingPromotion;
-      const uci = source + target + promotionPiece;
-      const success = makeMoveUci(uci, promotionPiece);
       
-      if (success) {
+      // Chess.js validation FIRST (sync), network call AFTER
+      if (!ChessJS) return;
+      const game = localGameRef.current || new ChessJS();
+      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
+      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+      
+      if (turnLetter !== playerColor) return; // Not your turn
+      
+      try {
+        const moved = game.move({ from: source, to: target, promotion: promotionPiece });
+        if (!moved) return;
+        
+        // Update local state immediately
+        localGameRef.current = game;
+        setBoardFen(game.fen());
+        setPgn(game.pgn());
+        
+        // Fire network request in background (don't wait)
+        makeMoveUci(source + target + promotionPiece, promotionPiece).catch(e => {
+          console.error('Promotion sync failed:', e);
+          // Optionally revert local state on failure
+        });
+        
         playMoveSound();
         setShowPromotionModal(false);
         setPendingPromotion(null);
+      } catch (e) {
+        console.error('Promotion failed:', e);
       }
     }
 
@@ -853,7 +896,7 @@ export default function Room() {
           position={position}
           onPieceDrop={onDrop}
           boardWidth={360}
-          arePiecesDraggable={!!(state?.clocks?.turn === (state?.colors?.[playerIdRef.current]))}
+          arePiecesDraggable={state?.clocks?.turn === state?.colors?.[playerIdRef.current]}
           customDarkSquareStyle={{ backgroundColor: '#b58863' }}
           customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
           customSquareStyles={customSquareStyles}
@@ -988,18 +1031,6 @@ export default function Room() {
 
       {message && <div style={{ color: 'green', marginTop: 8 }}>{message}</div>}
       {error && <div style={{ color: 'red', marginTop: 8 }}>{error}</div>}
-
-      {promotionPending && (
-        <div style={{ marginTop: 8, padding: 8, border: '1px solid #888', display: 'inline-block' }}>
-          <div>Choose promotion piece for move {promotionPending.uciBase}:</div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button onClick={() => { makeMoveUci(promotionPending.uciBase, 'q'); setPromotionPending(null); setMessage('Promoted to Queen'); }}>Queen</button>
-            <button onClick={() => { makeMoveUci(promotionPending.uciBase, 'r'); setPromotionPending(null); setMessage('Promoted to Rook'); }}>Rook</button>
-            <button onClick={() => { makeMoveUci(promotionPending.uciBase, 'b'); setPromotionPending(null); setMessage('Promoted to Bishop'); }}>Bishop</button>
-            <button onClick={() => { makeMoveUci(promotionPending.uciBase, 'n'); setPromotionPending(null); setMessage('Promoted to Knight'); }}>Knight</button>
-          </div>
-        </div>
-      )}
 
       {state && state.phase === 'PLAYING' && (
         <div style={{ textAlign: 'center', marginTop: 8 }}>
