@@ -755,31 +755,194 @@ export default function Room() {
 
   function Board({ fen }) {
     const [position, setPosition] = useState(fen || 'start');
+    const [lastMove, setLastMove] = useState(null);
+    const [showPromotionModal, setShowPromotionModal] = useState(false);
+    const [pendingPromotion, setPendingPromotion] = useState(null);
 
+    // Sync position with fen prop and track last move
     useEffect(() => {
       setPosition(fen || 'start');
     }, [fen]);
 
-    function onDrop(source, target, piece) {
-      const promotion = piece[1].toLowerCase() === 'p' && (target[1] === '8' || target[1] === '1')
-        ? 'q'  // auto-queen for simplicity, or trigger your promotion modal
-        : undefined;
+    // Play move sound function
+    function playMoveSound() {
+      if (typeof window !== 'undefined' && window.Audio) {
+        try {
+          // Create a simple move sound using Web Audio API
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.value = 800;
+          oscillator.type = 'sine';
+          gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+          
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + 0.1);
+        } catch (e) {
+          console.log('Could not play sound:', e);
+        }
+      }
+    }
 
-      const uci = source + target + (promotion || '');
-      const success = makeMoveUci(uci, promotion); // your existing function — returns true if success
+    // Extract last move from moves array
+    useEffect(() => {
+      if (state?.moves && state.moves.length > 0) {
+        const lastMoveData = state.moves[state.moves.length - 1];
+        if (lastMoveData && lastMoveData.uci) {
+          const from = lastMoveData.uci.slice(0, 2);
+          const to = lastMoveData.uci.slice(2, 4);
+          setLastMove([from, to]);
+        }
+      }
+    }, [state?.moves]);
+
+    // Custom square styles for last move highlighting
+    const customSquareStyles = {};
+    if (lastMove && lastMove.length === 2) {
+      customSquareStyles[lastMove[0]] = {
+        backgroundColor: 'rgba(255, 255, 0, 0.3)',
+        border: '2px solid #f39c12'
+      };
+      customSquareStyles[lastMove[1]] = {
+        backgroundColor: 'rgba(255, 255, 0, 0.3)',
+        border: '2px solid #f39c12'
+      };
+    }
+
+    function onDrop(source, target, piece) {
+      const isPawn = piece[1].toLowerCase() === 'p';
+      const isPromotion = isPawn && (target[1] === '8' || target[1] === '1');
+
+      if (isPromotion) {
+        // Show promotion modal instead of auto-queening
+        setPendingPromotion({ source, target, piece });
+        setShowPromotionModal(true);
+        return false; // Prevent the move until promotion is chosen
+      }
+
+      const uci = source + target;
+      const success = makeMoveUci(uci);
+      if (success) {
+        playMoveSound();
+      }
       return success;
     }
 
+    function handlePromotion(promotionPiece) {
+      if (!pendingPromotion) return;
+      
+      const { source, target } = pendingPromotion;
+      const uci = source + target + promotionPiece;
+      const success = makeMoveUci(uci, promotionPiece);
+      
+      if (success) {
+        playMoveSound();
+        setShowPromotionModal(false);
+        setPendingPromotion(null);
+      }
+    }
+
     return (
-      <Chessboard
-        position={position}
-        onPieceDrop={onDrop}
-        boardWidth={360} // same as your current size
-        arePiecesDraggable={!!(state?.clocks?.turn === (state?.colors?.[playerIdRef.current]))} // only your turn
-        customDarkSquareStyle={{ backgroundColor: '#b58863' }}
-        customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
-        // optional: last move highlight, arrows, etc.
-      />
+      <>
+        <Chessboard
+          position={position}
+          onPieceDrop={onDrop}
+          boardWidth={360}
+          arePiecesDraggable={!!(state?.clocks?.turn === (state?.colors?.[playerIdRef.current]))}
+          customDarkSquareStyle={{ backgroundColor: '#b58863' }}
+          customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
+          customSquareStyles={customSquareStyles}
+          animationDuration={300} // Smooth piece movement animations
+        />
+        
+        {showPromotionModal && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{
+              backgroundColor: 'white',
+              padding: '20px',
+              borderRadius: '8px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              textAlign: 'center'
+            }}>
+              <h3>Choose promotion piece:</h3>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
+                <button 
+                  onClick={() => handlePromotion('q')}
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    backgroundColor: '#007bff',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px'
+                  }}
+                >
+                  ♕ Queen
+                </button>
+                <button 
+                  onClick={() => handlePromotion('r')}
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    backgroundColor: '#28a745',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px'
+                  }}
+                >
+                  ♜ Rook
+                </button>
+                <button 
+                  onClick={() => handlePromotion('b')}
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    backgroundColor: '#ffc107',
+                    color: 'black',
+                    border: 'none',
+                    borderRadius: '4px'
+                  }}
+                >
+                  ♗ Bishop
+                </button>
+                <button 
+                  onClick={() => handlePromotion('n')}
+                  style={{
+                    padding: '10px 20px',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px'
+                  }}
+                >
+                  ♘ Knight
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
