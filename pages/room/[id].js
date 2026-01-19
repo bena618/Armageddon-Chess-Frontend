@@ -910,6 +910,16 @@ export default function Room() {
       }
     }
 
+    function onSquareRightClick(square) {
+      console.log('Right click on square:', square);
+      // Test if right clicks work
+    }
+
+    function onPieceDragBegin(piece, sourceSquare) {
+      console.log('Piece drag begin:', piece, sourceSquare);
+      // Test if drag events work
+    }
+
     function onDrop(source, target, piece) {
       const playerColor = state?.colors?.[playerIdRef.current] ?? null;
       if (!playerColor) return false;
@@ -993,6 +1003,8 @@ export default function Room() {
           position={position}
           onPieceDrop={onDrop}
           onSquareClick={onSquareClick}
+          onSquareRightClick={onSquareRightClick}
+          onPieceDragBegin={onPieceDragBegin}
           boardWidth={360}
           arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
           customDarkSquareStyle={{ backgroundColor: '#b58863' }}
