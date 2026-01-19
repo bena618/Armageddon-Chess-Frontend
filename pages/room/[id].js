@@ -821,19 +821,30 @@ export default function Room() {
     }
 
     function onSquareClick(square) {
+      console.log('Square clicked:', square);
       const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-      if (!playerColor) return;
+      console.log('Player color:', playerColor, 'Player ID:', playerIdRef.current);
+      if (!playerColor) {
+        console.log('No player color found');
+        return;
+      }
 
       const game = localGameRef.current || new ChessJS();
       const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+      console.log('Current turn:', turnLetter, 'Player turn:', playerColor);
       
       // Only allow selecting pieces on your turn
-      if (turnLetter !== playerColor) return;
+      if (turnLetter !== playerColor) {
+        console.log('Not your turn!');
+        return;
+      }
 
       const piece = game.get(square);
+      console.log('Piece at square:', piece);
       
       // If clicking on the same square, deselect it
       if (selectedSquare === square) {
+        console.log('Deselecting square');
         setSelectedSquare(null);
         setLegalMoves([]);
         return;
@@ -841,15 +852,19 @@ export default function Room() {
       
       // If there's a piece and it's the player's color, select it and show legal moves
       if (piece && ((piece.color === 'w' && playerColor === 'white') || (piece.color === 'b' && playerColor === 'black'))) {
+        console.log('Selecting piece');
         setSelectedSquare(square);
         
         // Calculate legal moves for this piece
         const moves = game.moves({ square, verbose: true });
         const moveTargets = moves.map(move => move.to);
+        console.log('Legal moves:', moveTargets);
         setLegalMoves(moveTargets);
       } else {
+        console.log('Cannot select this piece - wrong color or empty square');
         // If clicking on a legal move square, make the move
         if (selectedSquare && legalMoves.includes(square)) {
+          console.log('Making move to:', square);
           const piece = game.get(selectedSquare);
           const isPawn = piece && piece.type === 'p';
           const isPromotion = isPawn && (square[1] === '8' || square[1] === '1');
