@@ -758,6 +758,8 @@ export default function Room() {
     const [lastMove, setLastMove] = useState(null);
     const [showPromotionModal, setShowPromotionModal] = useState(false);
     const [pendingPromotion, setPendingPromotion] = useState(null);
+    const [selectedSquare, setSelectedSquare] = useState(null);
+    const [legalMoves, setLegalMoves] = useState([]);
 
     // Sync position when fen prop changes (from backend)
     useEffect(() => {
@@ -783,6 +785,22 @@ export default function Room() {
       customSquareStyles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
       customSquareStyles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
     }
+    
+    // Highlight selected square
+    if (selectedSquare) {
+      customSquareStyles[selectedSquare] = {
+        backgroundColor: 'rgba(0, 123, 255, 0.5)',
+        border: '2px solid #007bff'
+      };
+    }
+    
+    // Highlight legal moves
+    legalMoves.forEach(move => {
+      customSquareStyles[move] = {
+        backgroundColor: 'rgba(40, 167, 69, 0.4)',
+        border: '2px solid #28a745'
+      };
+    });
 
     function playMoveSound() {
       if (typeof window !== 'undefined' && window.Audio) {
@@ -799,6 +817,81 @@ export default function Room() {
           osc.start();
           osc.stop(ctx.currentTime + 0.1);
         } catch (e) {}
+      }
+    }
+
+    function onSquareClick(square) {
+      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
+      if (!playerColor) return;
+
+      const game = localGameRef.current || new ChessJS();
+      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+      
+      // Only allow selecting pieces on your turn
+      if (turnLetter !== playerColor) return;
+
+      const piece = game.get(square);
+      
+      // If clicking on the same square, deselect it
+      if (selectedSquare === square) {
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+      
+      // If there's a piece and it's the player's color, select it and show legal moves
+      if (piece && ((piece.color === 'w' && playerColor === 'white') || (piece.color === 'b' && playerColor === 'black'))) {
+        setSelectedSquare(square);
+        
+        // Calculate legal moves for this piece
+        const moves = game.moves({ square, verbose: true });
+        const moveTargets = moves.map(move => move.to);
+        setLegalMoves(moveTargets);
+      } else {
+        // If clicking on a legal move square, make the move
+        if (selectedSquare && legalMoves.includes(square)) {
+          const piece = game.get(selectedSquare);
+          const isPawn = piece && piece.type === 'p';
+          const isPromotion = isPawn && (square[1] === '8' || square[1] === '1');
+          
+          if (isPromotion) {
+            setPendingPromotion({ source: selectedSquare, target: square });
+            setShowPromotionModal(true);
+            setSelectedSquare(null);
+            setLegalMoves([]);
+            return;
+          }
+          
+          // Make the move
+          try {
+            const moved = game.move({ from: selectedSquare, to: square });
+            if (!moved) return;
+
+            // Accept locally immediately
+            localGameRef.current = game;
+            setPosition(game.fen());
+            setBoardFen(game.fen());
+            setPgn(game.pgn());
+            playMoveSound();
+
+            // Send to server in background
+            makeMoveUci(selectedSquare + square).catch(e => {
+              console.error('Move sync failed:', e);
+              setPosition(fen || 'start');
+            });
+
+            setSelectedSquare(null);
+            setLegalMoves([]);
+          } catch (e) {
+            // Invalid move, just clear selection
+            setSelectedSquare(null);
+            setLegalMoves([]);
+          }
+        } else {
+          // Clicking elsewhere, clear selection
+          setSelectedSquare(null);
+          setLegalMoves([]);
+        }
       }
     }
 
@@ -830,6 +923,10 @@ export default function Room() {
         setBoardFen(game.fen());
         setPgn(game.pgn());
         playMoveSound();
+        
+        // Clear selection after move
+        setSelectedSquare(null);
+        setLegalMoves([]);
 
         // Send to server in background
         makeMoveUci(source + target).catch(e => {
@@ -880,6 +977,7 @@ export default function Room() {
         <Chessboard
           position={position}
           onPieceDrop={onDrop}
+          onSquareClick={onSquareClick}
           boardWidth={360}
           arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
           customDarkSquareStyle={{ backgroundColor: '#b58863' }}
