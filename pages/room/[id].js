@@ -1013,6 +1013,13 @@ export default function Room() {
       <>
         <div 
           onClick={(e) => {
+            // Only handle left clicks
+            if (e.button !== 0) return;
+            
+            // Prevent event bubbling and multiple triggers
+            e.stopPropagation();
+            e.preventDefault();
+            
             // Try to capture clicks on the board container
             console.log('Board container clicked');
             const boardElement = e.currentTarget;
@@ -1035,6 +1042,10 @@ export default function Room() {
             }
           }}
           style={{ display: 'inline-block' }}
+          onMouseDown={(e) => {
+            // Prevent default drag behavior
+            e.preventDefault();
+          }}
         >
           <Chessboard
             position={position}
