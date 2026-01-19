@@ -1,5 +1,5 @@
 import { useRouter } from 'next/router';
-import { useEffect, useState, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Chessboard } from 'react-chessboard';
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
@@ -780,27 +780,39 @@ export default function Room() {
       }
     }, [state?.moves]);
 
-    const customSquareStyles = {};
-    if (lastMove?.length === 2) {
-      customSquareStyles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
-      customSquareStyles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
-    }
-    
-    // Highlight selected square
-    if (selectedSquare) {
-      customSquareStyles[selectedSquare] = {
-        backgroundColor: 'rgba(0, 123, 255, 0.5)',
-        border: '2px solid #007bff'
-      };
-    }
-    
-    // Highlight legal moves
-    legalMoves.forEach(move => {
-      customSquareStyles[move] = {
-        backgroundColor: 'rgba(40, 167, 69, 0.4)',
-        border: '2px solid #28a745'
-      };
-    });
+    // Force re-render when selection changes
+    useEffect(() => {
+      console.log('Selection changed:', { selectedSquare, legalMoves });
+    }, [selectedSquare, legalMoves]);
+
+    const customSquareStyles = useMemo(() => {
+      const styles = {};
+      if (lastMove?.length === 2) {
+        styles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
+        styles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
+      }
+      
+      // Highlight selected square
+      if (selectedSquare) {
+        styles[selectedSquare] = {
+          backgroundColor: 'rgba(0, 123, 255, 0.5)',
+          border: '2px solid #007bff'
+        };
+        console.log('Highlighting selected square:', selectedSquare);
+      }
+      
+      // Highlight legal moves
+      legalMoves.forEach(move => {
+        styles[move] = {
+          backgroundColor: 'rgba(40, 167, 69, 0.4)',
+          border: '2px solid #28a745'
+        };
+        console.log('Highlighting legal move:', move);
+      });
+      
+      console.log('Final customSquareStyles:', styles);
+      return styles;
+    }, [lastMove, selectedSquare, legalMoves]);
 
     function playMoveSound() {
       if (typeof window !== 'undefined' && window.Audio) {
