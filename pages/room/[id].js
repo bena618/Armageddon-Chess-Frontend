@@ -787,11 +787,6 @@ export default function Room() {
       }
     }, [state?.moves]);
 
-    // Force re-render when selection changes
-    useEffect(() => {
-      console.log('Selection changed:', { selectedSquare, legalMoves });
-    }, [selectedSquare, legalMoves]);
-
     const customSquareStyles = useMemo(() => {
       const styles = {};
 
@@ -838,57 +833,31 @@ export default function Room() {
     }
 
   function onSquareClick(square) {
-    console.log('Square clicked:', square);
-
     const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-    if (!playerColor) {
-      console.log('No player color found');
-      return;
-    }
+    if (!playerColor) return;
 
     // Use the REAL game instance (with full move history)
     const game = localGameRef.current;
-    if (!game) {
-      console.log('No game instance loaded yet');
-      return;
-    }
+    if (!game) return;
 
     const turnLetter = game.turn() === 'w' ? 'white' : 'black';
-    console.log('Current turn:', turnLetter, 'Player turn:', playerColor);
 
     // Only allow interaction on your turn
-    if (turnLetter !== playerColor) {
-      console.log('Not your turn!');
-      return;
-    }
+    if (turnLetter !== playerColor) return;
 
     const piece = game.get(square);
-    console.log('Piece at square:', piece);
 
-    // Deselect if clicking same square
+    // If clicking the same square, deselect it
     if (selectedSquare === square) {
-      console.log('Deselecting square');
+      console.log('Deselected square:', square);
       setSelectedSquare(null);
       setLegalMoves([]);
       return;
     }
 
-    // Select piece if it's yours
-    if (piece && ((piece.color === 'w' && playerColor === 'white') || (piece.color === 'b' && playerColor === 'black'))) {
-      console.log('Selecting piece');
-
-      setSelectedSquare(square);
-
-      // Calculate REAL legal moves from current game position
-      const moves = game.moves({ square, verbose: true }) || [];
-      const moveTargets = moves.map(m => m.to);
-      console.log('Legal moves:', moveTargets);
-
-      setLegalMoves(moveTargets);
-    } else if (selectedSquare && legalMoves.includes(square)) {
-      // Clicked on a legal target → make the move
-      console.log('Making move to:', square);
-
+    // If we have a selection and clicking on a legal move, make the move
+    if (selectedSquare && legalMoves.includes(square)) {
+      console.log('Moving piece:', selectedSquare, '→', square);
       const from = selectedSquare;
       const to = square;
 
@@ -907,10 +876,7 @@ export default function Room() {
       // Normal move
       try {
         const moved = game.move({ from, to });
-        if (!moved) {
-          console.log('Move rejected by chess.js');
-          return;
-        }
+        if (!moved) return;
 
         // Optimistic update
         localGameRef.current = game;
@@ -933,8 +899,25 @@ export default function Room() {
         setSelectedSquare(null);
         setLegalMoves([]);
       }
+      return;
+    }
+
+    // Select piece if it's yours
+    if (piece && ((piece.color === 'w' && playerColor === 'white') || (piece.color === 'b' && playerColor === 'black'))) {
+      console.log('Selected piece:', piece.type, 'at', square);
+      setSelectedSquare(square);
+
+      // Calculate REAL legal moves from current game position
+      const moves = game.moves({ square, verbose: true }) || [];
+      const moveTargets = moves.map(m => m.to);
+      console.log('Legal moves:', moveTargets);
+
+      setLegalMoves(moveTargets);
     } else {
-      // Clicked empty or opponent piece → clear
+      // Clicked empty or opponent piece → clear selection
+      if (selectedSquare) {
+        console.log('Cleared selection');
+      }
       setSelectedSquare(null);
       setLegalMoves([]);
     }
