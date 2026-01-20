@@ -192,6 +192,13 @@ export default function Room() {
     });
   }, []);
 
+  useEffect(() => {
+    if (ChessJS && !localGameRef.current) {
+      localGameRef.current = new ChessJS();
+      setBoardFen('start');
+    }
+  }, [ChessJS]);
+
   async function autoJoin(playerId, playerName) {
     const roomId = getBackendRoomId();
     if (!roomId) {
@@ -346,7 +353,7 @@ export default function Room() {
       }
     }
 
-      if (room.clocks) {
+    if (room.clocks) {
         const now = Date.now();
 
       if (room.phase === 'FINISHED' && room.clocks.frozenAt) {
@@ -832,95 +839,108 @@ export default function Room() {
       }
     }
 
-    function onSquareClick(square) {
-      console.log('Square clicked:', square);
-      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-      console.log('Player color:', playerColor, 'Player ID:', playerIdRef.current);
-      if (!playerColor) {
-        console.log('No player color found');
-        return;
-      }
+  function onSquareClick(square) {
+    console.log('Square clicked:', square);
 
-      const game = localGameRef.current || new ChessJS();
-      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
-      console.log('Current turn:', turnLetter, 'Player turn:', playerColor);
-      
-      // Only allow selecting pieces on your turn
-      if (turnLetter !== playerColor) {
-        console.log('Not your turn!');
-        return;
-      }
+    const playerColor = state?.colors?.[playerIdRef.current] ?? null;
+    if (!playerColor) {
+      console.log('No player color found');
+      return;
+    }
 
-      const piece = game.get(square);
-      console.log('Piece at square:', piece);
-      
-      // If clicking on the same square, deselect it
-      if (selectedSquare === square) {
-        console.log('Deselecting square');
+    // Use the REAL game instance (with full move history)
+    const game = localGameRef.current;
+    if (!game) {
+      console.log('No game instance loaded yet');
+      return;
+    }
+
+    const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+    console.log('Current turn:', turnLetter, 'Player turn:', playerColor);
+
+    // Only allow interaction on your turn
+    if (turnLetter !== playerColor) {
+      console.log('Not your turn!');
+      return;
+    }
+
+    const piece = game.get(square);
+    console.log('Piece at square:', piece);
+
+    // Deselect if clicking same square
+    if (selectedSquare === square) {
+      console.log('Deselecting square');
+      setSelectedSquare(null);
+      setLegalMoves([]);
+      return;
+    }
+
+    // Select piece if it's yours
+    if (piece && ((piece.color === 'w' && playerColor === 'white') || (piece.color === 'b' && playerColor === 'black'))) {
+      console.log('Selecting piece');
+
+      setSelectedSquare(square);
+
+      // Calculate REAL legal moves from current game position
+      const moves = game.moves({ square, verbose: true }) || [];
+      const moveTargets = moves.map(m => m.to);
+      console.log('Legal moves:', moveTargets);
+
+      setLegalMoves(moveTargets);
+    } else if (selectedSquare && legalMoves.includes(square)) {
+      // Clicked on a legal target → make the move
+      console.log('Making move to:', square);
+
+      const from = selectedSquare;
+      const to = square;
+
+      const piece = game.get(from);
+      const isPawn = piece && piece.type === 'p';
+      const isPromotion = isPawn && (to[1] === '8' || to[1] === '1');
+
+      if (isPromotion) {
+        setPendingPromotion({ source: from, target: to });
+        setShowPromotionModal(true);
         setSelectedSquare(null);
         setLegalMoves([]);
         return;
       }
-      
-      // If there's a piece and it's the player's color, select it and show legal moves
-      if (piece && ((piece.color === 'w' && playerColor === 'white') || (piece.color === 'b' && playerColor === 'black'))) {
-        console.log('Selecting piece');
-        setSelectedSquare(square);
-        
-        // Calculate legal moves for this piece
-        const moves = game.moves({ square, verbose: true });
-        const moveTargets = moves.map(move => move.to);
-        console.log('Legal moves:', moveTargets);
-        setLegalMoves(moveTargets);
-      } else {
-        console.log('Cannot select this piece - wrong color or empty square');
-        // If clicking on a legal move square, make the move
-        if (selectedSquare && legalMoves.includes(square)) {
-          console.log('Making move to:', square);
-          const piece = game.get(selectedSquare);
-          const isPawn = piece && piece.type === 'p';
-          const isPromotion = isPawn && (square[1] === '8' || square[1] === '1');
-          
-          if (isPromotion) {
-            setPendingPromotion({ source: selectedSquare, target: square });
-            setShowPromotionModal(true);
-            setSelectedSquare(null);
-            setLegalMoves([]);
-            return;
-          }
-          
-          // Make the move
-          try {
-            const moved = game.move({ from: selectedSquare, to: square });
-            if (!moved) return;
 
-            // Accept locally immediately
-            localGameRef.current = game;
-            setPosition(game.fen());
-            setBoardFen(game.fen());
-            setPgn(game.pgn());
-            playMoveSound();
-
-            // Send to server in background
-            makeMoveUci(selectedSquare + square).catch(e => {
-              console.error('Move sync failed:', e);
-              setPosition(fen || 'start');
-            });
-
-            setSelectedSquare(null);
-            setLegalMoves([]);
-          } catch (e) {
-            // Invalid move, just clear selection
-            setSelectedSquare(null);
-            setLegalMoves([]);
-          }
-        } else {
-          // Clicking elsewhere, clear selection
-          setSelectedSquare(null);
-          setLegalMoves([]);
+      // Normal move
+      try {
+        const moved = game.move({ from, to });
+        if (!moved) {
+          console.log('Move rejected by chess.js');
+          return;
         }
+
+        // Optimistic update
+        localGameRef.current = game;
+        setPosition(game.fen());
+        setBoardFen(game.fen());
+        setPgn(game.pgn());
+        playMoveSound();
+
+        // Send to server
+        makeMoveUci(from + to).catch(e => {
+          console.error('Move sync failed:', e);
+          setPosition(fen || 'start'); // revert
+        });
+
+        // Clear selection
+        setSelectedSquare(null);
+        setLegalMoves([]);
+      } catch (e) {
+        console.error('Move failed:', e);
+        setSelectedSquare(null);
+        setLegalMoves([]);
       }
+    } else {
+      // Clicked empty or opponent piece → clear
+      setSelectedSquare(null);
+      setLegalMoves([]);
     }
+  }
 
     function onSquareRightClick(square) {
       console.log('Right click on square:', square);
@@ -1052,6 +1072,10 @@ export default function Room() {
             onPieceDrop={onDrop}
             onSquareRightClick={onSquareRightClick}
             onPieceDragBegin={onPieceDragBegin}
+            onSquareClick={(square) => {
+              console.log('Square clicked:', square);
+              onSquareClick(square);
+            }}
             boardWidth={360}
             arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
             customDarkSquareStyle={{ backgroundColor: '#b58863' }}
@@ -1060,7 +1084,6 @@ export default function Room() {
             animationDuration={300}
           />
         </div>
-
         {showPromotionModal && (
           <div style={{
             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
@@ -1103,16 +1126,17 @@ export default function Room() {
   }
 
   if (loading || joining || !state) {
-    return <div className="container">
-      {joining ? 'Joining room...' : (!state ? 'Loading room state...' : 'Loading...')}
-    </div>;
+    return (
+      <div className="container">
+        {joining ? 'Joining room...' : (!state ? 'Loading room state...' : 'Loading...')}
+      </div>
+    );
   }
 
   const playerId = playerIdRef.current;
   const amIWinner = state?.winnerId && playerId === state.winnerId;
   const myColor = state.colors?.[playerId] ?? null;
   const isMyTurn = state.clocks && myColor && state.clocks.turn === myColor;
-
 
   return (
     <main className="container">
@@ -1184,7 +1208,6 @@ export default function Room() {
             </ul>
           </div>
 
-
           {state?.phase === 'LOBBY' && (
             <div>
               {state?.startRequestedBy ? (
@@ -1193,7 +1216,7 @@ export default function Room() {
                     {state?.startRequestedBy === playerIdRef.current ? (
                       <div>You requested bidding — waiting for opponent confirmation</div>
                     ) : (
-                      <div>{(state?.players.find(p => p.id === state?.startRequestedBy)?.name) || state?.startRequestedBy} requested bidding — click <strong>Start Bidding</strong> to confirm</div>
+                      <div>{(state?.players?.find(p => p.id === state?.startRequestedBy)?.name) || state?.startRequestedBy} requested bidding — click <strong>Start Bidding</strong> to confirm</div>
                     )}
                     <div style={{ fontSize: '14px', color: '#666', marginTop: 4 }}>
                       Both players return to lobby if no confirmation in:
@@ -1264,7 +1287,6 @@ export default function Room() {
             </div>
           )}
 
-
           {(state?.phase === 'PLAYING' || state?.phase === 'FINISHED') && (
             <div>
               <div style={{ 
@@ -1320,17 +1342,6 @@ export default function Room() {
                 </div>
               </div>
 
-              <div style={{ marginTop: 16 }}>
-                <strong>Moves:</strong>
-                <pre>{JSON.stringify(state?.moves || [], null, 2)}</pre>
-              </div>
-              <div style={{ marginTop: 8 }}>
-                <strong>FEN:</strong>
-                <div style={{ fontFamily: 'monospace', fontSize: 12 }}>{boardFen === 'start' ? (localGameRef.current ? localGameRef.current.fen() : 'start') : boardFen}</div>
-                <strong>PGN:</strong>
-                <div style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'pre-wrap' }}>{pgn}</div>
-              </div>
-
               {state?.phase === 'FINISHED' && (
                 <div style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', background: '#f7fff7', borderRadius: 8 }}>
                   <div style={{ marginBottom: 16 }}>
@@ -1367,16 +1378,4 @@ export default function Room() {
       )}
     </main>
   );
-}
-export async function getStaticPaths() {
-  return {
-    paths: [],
-    fallback: 'blocking'
-  };
-}
-
-export async function getStaticProps() {
-  return {
-    props: {}
-  };
 }
