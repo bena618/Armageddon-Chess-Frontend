@@ -1024,7 +1024,7 @@ export default function Room() {
             onSquareClick(square);
           }}
           boardWidth={360}
-          arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
+          arePiecesDraggable={true}
           customDarkSquareStyle={{ backgroundColor: '#b58863' }}
           customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
           customSquareStyles={customSquareStyles}
