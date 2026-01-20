@@ -1013,23 +1013,25 @@ export default function Room() {
 
     return (
       <>
-        <Chessboard
-          key={position}
-          position={position}
-          onPieceDrop={onDrop}
-          onSquareRightClick={onSquareRightClick}
-          onPieceDragBegin={onPieceDragBegin}
-          onSquareClick={(square) => {
-            console.log('React-chessboard onSquareClick fired:', square);
-            onSquareClick(square);
-          }}
-          boardWidth={360}
-          arePiecesDraggable={true}
-          customDarkSquareStyle={{ backgroundColor: '#b58863' }}
-          customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
-          customSquareStyles={customSquareStyles}
-          animationDuration={300}
-        />
+        <div onClick={() => console.log('Board wrapper clicked!')} style={{ display: 'inline-block' }}>
+          <Chessboard
+            key={position}
+            position={position}
+            onPieceDrop={onDrop}
+            onSquareRightClick={onSquareRightClick}
+            onPieceDragBegin={onPieceDragBegin}
+            onSquareClick={(square) => {
+              console.log('React-chessboard onSquareClick fired:', square);
+              onSquareClick(square);
+            }}
+            boardWidth={360}
+            arePiecesDraggable={true}
+            customDarkSquareStyle={{ backgroundColor: '#b58863' }}
+            customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
+            customSquareStyles={customSquareStyles}
+            animationDuration={300}
+          />
+        </div>
         {showPromotionModal && (
           <div style={{
             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
