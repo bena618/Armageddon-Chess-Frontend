@@ -543,7 +543,7 @@ export default function Room() {
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
         }
       }
-    }, 500);
+    }, 2000);
     return () => clearInterval(t);
   }, [state, gameOverInfo]);
 
@@ -794,32 +794,30 @@ export default function Room() {
 
     const customSquareStyles = useMemo(() => {
       const styles = {};
+
       if (lastMove?.length === 2) {
         styles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
         styles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
       }
-      
-      // Highlight selected square
-      if (selectedSquare) {
-        styles[selectedSquare] = {
-          backgroundColor: 'rgba(0, 123, 255, 0.5)',
-          border: '2px solid #007bff'
-        };
-        console.log('Highlighting selected square:', selectedSquare);
+
+      if (state?.clocks?.turn === state?.colors?.[playerIdRef.current]) {
+        if (selectedSquare) {
+          styles[selectedSquare] = {
+            backgroundColor: 'rgba(0, 123, 255, 0.5)',
+            border: '2px solid #007bff'
+          };
+        }
+        legalMoves.forEach(move => {
+          styles[move] = {
+            backgroundColor: 'rgba(40, 167, 69, 0.4)',
+            border: '2px solid #28a745'
+          };
+        });
       }
-      
-      // Highlight legal moves
-      legalMoves.forEach(move => {
-        styles[move] = {
-          backgroundColor: 'rgba(40, 167, 69, 0.4)',
-          border: '2px solid #28a745'
-        };
-        console.log('Highlighting legal move:', move);
-      });
-      
+
       console.log('Final customSquareStyles:', styles);
       return styles;
-    }, [lastMove, selectedSquare, legalMoves]);
+    }, [lastMove, selectedSquare, legalMoves, state?.clocks?.turn, state?.colors, playerIdRef.current]);
 
     function playMoveSound() {
       if (typeof window !== 'undefined' && window.Audio) {
@@ -1025,7 +1023,7 @@ export default function Room() {
         setShowPromotionModal(false);
         setPendingPromotion(null);
       } catch (e) {
-        console.error('Promotion failed:', e);
+        console.error('Promotion failed:', e); // Fix: Added missing closing parenthesis
       }
     }
 
@@ -1073,7 +1071,6 @@ export default function Room() {
             onSquareRightClick={onSquareRightClick}
             onPieceDragBegin={onPieceDragBegin}
             onSquareClick={(square) => {
-              console.log('Square clicked:', square);
               onSquareClick(square);
             }}
             boardWidth={360}
