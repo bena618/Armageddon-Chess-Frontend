@@ -23,7 +23,7 @@ function setCookie(name, value, hours) {
 
 export default function Room() {
   const router = useRouter();
-
+  
   // Safe room ID from URL path (works during static export and client-side)
   const getRoomId = () => {
     if (typeof window !== 'undefined') {
@@ -1012,65 +1012,25 @@ export default function Room() {
     }
 
     return (
-      <>
-        <div onClick={() => console.log('Board wrapper clicked!')} style={{ display: 'inline-block' }}>
-          <Chessboard
-            key={position}
-            position={position}
-            onPieceDrop={onDrop}
-            onSquareRightClick={onSquareRightClick}
-            onPieceDragBegin={onPieceDragBegin}
-            onSquareClick={(square) => {
-              console.log('React-chessboard onSquareClick fired:', square);
-              onSquareClick(square);
-            }}
-            boardWidth={360}
-            arePiecesDraggable={true}
-            customDarkSquareStyle={{ backgroundColor: '#b58863' }}
-            customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
-            customSquareStyles={customSquareStyles}
-            animationDuration={300}
-          />
-        </div>
-        {showPromotionModal && (
-          <div style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-          }}>
-            <div style={{
-              background: 'white', padding: '24px', borderRadius: '12px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.4)', textAlign: 'center'
-            }}>
-              <h3 style={{ margin: '0 0 16px' }}>Promote pawn to:</h3>
-              <div style={{ display: 'flex', gap: '16px' }}>
-                {['q', 'r', 'b', 'n'].map(p => (
-                  <button
-                    key={p}
-                    onClick={() => handlePromotion(p)}
-                    style={{
-                      fontSize: '40px', padding: '12px 24px',
-                      background: '#f8f9fa', border: '1px solid #ccc',
-                      borderRadius: '8px', cursor: 'pointer', minWidth: '80px'
-                    }}
-                  >
-                    {p === 'q' ? '♕' : p === 'r' ? '♜' : p === 'b' ? '♝' : '♞'}
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={() => {
-                  setShowPromotionModal(false);
-                  setPendingPromotion(null);
-                }}
-                style={{ marginTop: '16px', padding: '8px 16px' }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </>
+      <Chessboard
+        key={position}
+        position={position}
+        onPieceDrop={onDrop}
+        onSquareRightClick={onSquareRightClick}
+        onPieceDragBegin={onPieceDragBegin}
+        onSquareClick={(square) => {
+          console.log('React-chessboard onSquareClick fired:', square);
+          onSquareClick(square);
+        }}
+        boardWidth={360}
+        arePiecesDraggable={true}
+        customDarkSquareStyle={{ backgroundColor: '#b58863' }}
+        customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
+        customSquareStyles={customSquareStyles}
+        animationDuration={300}
+      />
     );
+
   }
 
   if (loading || joining || !state) {
