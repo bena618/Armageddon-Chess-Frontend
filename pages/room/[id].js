@@ -1019,7 +1019,10 @@ export default function Room() {
           onPieceDrop={onDrop}
           onSquareRightClick={onSquareRightClick}
           onPieceDragBegin={onPieceDragBegin}
-          onSquareClick={onSquareClick}
+          onSquareClick={(square) => {
+            console.log('React-chessboard onSquareClick fired:', square);
+            onSquareClick(square);
+          }}
           boardWidth={360}
           arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
           customDarkSquareStyle={{ backgroundColor: '#b58863' }}
