@@ -795,24 +795,25 @@ export default function Room() {
         styles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
       }
 
-      if (state?.clocks?.turn === state?.colors?.[playerIdRef.current]) {
-        if (selectedSquare) {
-          styles[selectedSquare] = {
-            backgroundColor: 'rgba(0, 123, 255, 0.5)',
-            border: '2px solid #007bff'
-          };
-        }
-        legalMoves.forEach(move => {
-          styles[move] = {
-            backgroundColor: 'rgba(40, 167, 69, 0.4)',
-            border: '2px solid #28a745'
-          };
-        });
+      // Always show highlights when there's a selection, regardless of turn
+      if (selectedSquare) {
+        styles[selectedSquare] = {
+          backgroundColor: 'rgba(0, 123, 255, 0.5)',
+          border: '2px solid #007bff'
+        };
       }
+      
+      legalMoves.forEach(move => {
+        styles[move] = {
+          backgroundColor: 'rgba(40, 167, 69, 0.4)',
+          border: '2px solid #28a745'
+        };
+      });
 
       console.log('Final customSquareStyles:', styles);
+      console.log('Debug - selectedSquare:', selectedSquare, 'legalMoves:', legalMoves);
       return styles;
-    }, [lastMove, selectedSquare, legalMoves, state?.clocks?.turn, state?.colors, playerIdRef.current]);
+    }, [lastMove, selectedSquare, legalMoves]);
 
     function playMoveSound() {
       if (typeof window !== 'undefined' && window.Audio) {
