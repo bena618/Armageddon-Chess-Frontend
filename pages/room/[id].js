@@ -1013,58 +1013,20 @@ export default function Room() {
 
     return (
       <>
-        <div 
-          onClick={(e) => {
-            // Only handle left clicks
-            if (e.button !== 0) return;
-            
-            // Prevent event bubbling and multiple triggers
-            e.stopPropagation();
-            e.preventDefault();
-            
-            // Try to capture clicks on the board container
-            console.log('Board container clicked');
-            const boardElement = e.currentTarget;
-            const rect = boardElement.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            console.log('Click position:', x, y);
-            
-            // Try to calculate square from position (approximate)
-            const squareSize = 360 / 8; // 45px per square
-            const file = Math.floor(x / squareSize);
-            const rank = 7 - Math.floor(y / squareSize); // Invert Y for chess notation
-            const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-            const square = files[file] + (rank + 1);
-            
-            if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
-              console.log('Calculated square:', square);
-              // Call the original handler
-              onSquareClick(square);
-            }
-          }}
-          style={{ display: 'inline-block' }}
-          onMouseDown={(e) => {
-            // Prevent default drag behavior
-            e.preventDefault();
-          }}
-        >
-          <Chessboard
-            position={position}
-            onPieceDrop={onDrop}
-            onSquareRightClick={onSquareRightClick}
-            onPieceDragBegin={onPieceDragBegin}
-            onSquareClick={(square) => {
-              onSquareClick(square);
-            }}
-            boardWidth={360}
-            arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
-            customDarkSquareStyle={{ backgroundColor: '#b58863' }}
-            customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
-            customSquareStyles={customSquareStyles}
-            animationDuration={300}
-          />
-        </div>
+        <Chessboard
+          key={position}
+          position={position}
+          onPieceDrop={onDrop}
+          onSquareRightClick={onSquareRightClick}
+          onPieceDragBegin={onPieceDragBegin}
+          onSquareClick={onSquareClick}
+          boardWidth={360}
+          arePiecesDraggable={!!(state?.clocks?.turn === state?.colors?.[playerIdRef.current])}
+          customDarkSquareStyle={{ backgroundColor: '#b58863' }}
+          customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
+          customSquareStyles={customSquareStyles}
+          animationDuration={300}
+        />
         {showPromotionModal && (
           <div style={{
             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
