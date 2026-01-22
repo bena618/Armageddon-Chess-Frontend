@@ -276,15 +276,7 @@ export default function Room() {
       }, 5000);
       wsRef.current.heartbeatInterval = heartbeat;
       
-      try {
-        if (shortPollRef.current) clearInterval(shortPollRef.current);
-        if (shortPollTimeoutRef.current) clearTimeout(shortPollTimeoutRef.current);
-        shortPollRef.current = setInterval(() => fetchState(), 1000);
-        shortPollTimeoutRef.current = setTimeout(() => {
-          if (shortPollRef.current) clearInterval(shortPollRef.current);
-          shortPollRef.current = null;
-        }, 8000);
-      } catch (e) {}
+      // WebSocket short polling disabled - main polling useEffect handles it
     };
 
     wsRef.current.onmessage = (event) => {
@@ -309,7 +301,6 @@ export default function Room() {
       }
     };
 
-    
     wsRef.current.onclose = (event) => {
       // *** CLEANUP HEARTBEAT ***
       if (wsRef.current && wsRef.current.heartbeatInterval) {
