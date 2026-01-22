@@ -260,7 +260,7 @@ export default function Room() {
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
-      fetchState();
+      console.log('WebSocket connected');
       
       // *** HEARTBEAT: Keep connection alive every 5s ***
       const heartbeat = setInterval(async () => {
@@ -539,10 +539,12 @@ export default function Room() {
   useEffect(() => {
     if (!roomId || !joined) return;
 
-    fetchState();
-    const interval = setInterval(fetchState, 2000);
-
-    return () => clearInterval(interval);
+    // Only start polling if WebSocket is NOT connected
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      fetchState();
+      const interval = setInterval(fetchState, 2000);
+      return () => clearInterval(interval);
+    }
   }, [roomId, joined]);
 
   useEffect(() => {
