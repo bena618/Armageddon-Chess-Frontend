@@ -4,6 +4,10 @@ import { Chessboard } from 'react-chessboard';
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
+console.log('=== DEBUG INFO ===');
+console.log('BASE URL:', BASE);
+console.log('Room ID from URL:', typeof window !== 'undefined' ? window.location.pathname : 'server-side');
+
 let ChessJS = null;
 
 // Helper cookie functions
@@ -84,11 +88,14 @@ export default function Room() {
     }
     const pathId = m[1];
 
+    console.log('DEBUG: Extracted pathId:', pathId);
+
     if (!roomIdRef.current) {
       roomIdRef.current = pathId;
     }
 
     const currentRoomId = roomIdRef.current;
+    console.log('DEBUG: Final roomIdRef.current:', currentRoomId);
     if (!currentRoomId) {
       setError('Invalid room URL');
       return;
@@ -109,7 +116,10 @@ export default function Room() {
 
   const getBackendRoomId = () => {
     const rid = roomIdRef.current || roomId || '';
-    return rid.startsWith('room-') ? rid : (rid ? 'room-' + rid : null);
+    console.log('DEBUG: getBackendRoomId input rid:', rid);
+    const result = rid.startsWith('room-') ? rid : (rid ? 'room-' + rid : null);
+    console.log('DEBUG: getBackendRoomId result:', result);
+    return result;
   };
 
   function Countdown({ deadline, totalMs, onExpire }) {
@@ -391,26 +401,42 @@ export default function Room() {
 
   async function fetchState() {
     const backendId = getBackendRoomId();
-    if (!backendId) return;
+    console.log('fetchState: Starting for ID', backendId);
+    if (!backendId) {
+      console.error('fetchState: No backendId');
+      return;
+    }
+
+    console.log('fetchState: Full URL:', `${BASE}/rooms/${backendId}`);
 
     try {
       const res = await fetch(`${BASE}/rooms/${backendId}`);
+      console.log('fetchState: GET status', res.status);
+
       if (!res.ok) {
         if (res.status === 404) {
           setMessage('Room no longer exists — sending you back to lobby');
           setTimeout(() => router.replace('/'), 3000);
           return;
         }
-        throw new Error('Failed to fetch state');
+        throw new Error(`HTTP ${res.status}`);
       }
 
       const data = await res.json();
+      console.log('fetchState: Raw response data:', data);
       const room = data.room || data;
+      console.log('fetchState: Parsed room:', room);
 
-      if (!room || !room.roomId || room.roomId !== backendId) {
+      // Temporarily disable strict ID validation for debugging
+      if (!room) {
+        console.warn('fetchState: Room validation failed - no room object');
         setError('Room not found');
         return;
       }
+
+      console.log('fetchState: State set successfully');
+      updateLocalGameAndClocks(room);
+      setState(room);
 
       if (data.startExpired || room.closed) {
         setMessage('Start request expired — returning to lobby');
