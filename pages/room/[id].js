@@ -100,6 +100,7 @@ export default function Room() {
     if (savedName && savedPlayerId) {
       setName(savedName);
       playerIdRef.current = savedPlayerId;
+      setLoading(true);  // Set loading to true before autoJoin
       autoJoin(savedPlayerId, savedName);
     } else {
       setLoading(false);
