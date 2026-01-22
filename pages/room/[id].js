@@ -241,6 +241,7 @@ export default function Room() {
       const data = await res.json().catch(() => ({}));
       console.log('DEBUG: Join response data:', data);
       setJoined(true);
+      setupWebSocket(); // Enable WebSocket after successful join
       await fetchState();
     } catch (e) {
       console.error('DEBUG: Network error:', e);
@@ -342,7 +343,6 @@ export default function Room() {
       } catch (e) {}
       localGameRef.current = game;
       setBoardFen(game.fen());
-      setPosition(game.fen());
       setPgn(game.pgn());
 
       if (room.phase === 'FINISHED' && room.winnerId) {
