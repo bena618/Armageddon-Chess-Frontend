@@ -1012,47 +1012,23 @@ export default function Room() {
     }
 
     return (
-      <div 
-        onClick={(e) => {
-          // Get the chessboard element
-          const boardElement = e.currentTarget.querySelector('[data-boardid]');
-          if (!boardElement) return;
-          
-          // Calculate square from click position
-          const rect = boardElement.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-          const squareSize = rect.width / 8;
-          const file = Math.floor(x / squareSize);
-          const rank = 7 - Math.floor(y / squareSize);
-          const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-          const square = files[file] + (rank + 1);
-          
-          if (file >= 0 && file < 8 && rank >= 0 && rank < 8) {
-            console.log('Manual board click:', square);
-            onSquareClick(square);
-          }
+      <Chessboard
+        key={position}
+        position={position}
+        onPieceDrop={onDrop}
+        onSquareRightClick={onSquareRightClick}
+        onPieceDragBegin={onPieceDragBegin}
+        onPieceClick={({ square, piece }) => {
+          console.log('React-chessboard onPieceClick fired:', square, piece ? `(${piece.type} ${piece.color})` : '(empty)');
+          onSquareClick(square);
         }}
-        style={{ display: 'inline-block', cursor: 'pointer' }}
-      >
-        <Chessboard
-          key={position}
-          position={position}
-          onPieceDrop={onDrop}
-          onSquareRightClick={onSquareRightClick}
-          onPieceDragBegin={onPieceDragBegin}
-          onSquareClick={(square) => {
-            console.log('React-chessboard onSquareClick fired:', square);
-            onSquareClick(square);
-          }}
-          boardWidth={360}
-          arePiecesDraggable={true}
-          customDarkSquareStyle={{ backgroundColor: '#b58863' }}
-          customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
-          customSquareStyles={customSquareStyles}
-          animationDuration={300}
-        />
-      </div>
+        boardWidth={360}
+        arePiecesDraggable={true}
+        customDarkSquareStyle={{ backgroundColor: '#b58863' }}
+        customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
+        customSquareStyles={customSquareStyles}
+        animationDuration={300}
+      />
     );
 
   }
