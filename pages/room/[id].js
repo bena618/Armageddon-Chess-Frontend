@@ -658,19 +658,6 @@ export default function Room() {
     }
   }
 
-  useEffect(() => {
-    if (!roomId || !joined) return;
-
-    const fetchAndCheck = async () => {
-      await fetchState(); 
-    };
-
-    fetchAndCheck();
-    const interval = setInterval(fetchAndCheck, startPending ? 1000 : 2000);
-
-    return () => clearInterval(interval);
-  }, [roomId, joined, startPending]);
-
   async function chooseColor(color) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return; }
