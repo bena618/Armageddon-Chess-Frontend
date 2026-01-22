@@ -200,41 +200,24 @@ export default function Room() {
   }, [ChessJS]);
 
   async function autoJoin(playerId, playerName) {
-    const roomId = getBackendRoomId();
-    if (!roomId) {
-      setError('No room ID in URL');
-      return;
-    }
+    const backendId = getBackendRoomId();
+    if (!backendId) { setError('Missing room ID'); return; }
 
-    setJoining(true);
     try {
-      const res = await fetch(`${BASE}/rooms/${roomId}/join`, {
+      const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'unknown' }));
-        setError(err.error || 'Failed to join');
+        const err = await res.json().catch(() => ({}));
+        setError('Failed to join: ' + (err.error || res.status));
         return;
       }
 
-      localStorage.setItem('playerName', playerName);
-      localStorage.setItem('playerId', playerId);
-      setCookie('playerName', playerName, 5);
-      setCookie('playerId', playerId, 5);
-
-      await fetch(`${BASE}/rooms/${roomId}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, name: playerName })
-      }).catch(e => console.error('Re-join failed:', e));
-
-      playerIdRef.current = playerId;
+      const data = await res.json().catch(() => ({}));
       setJoined(true);
-
-      setTimeout(setupWebSocket, 2000);
       await fetchState();
     } catch (e) {
       setError('Network error joining room');
@@ -344,6 +327,7 @@ export default function Room() {
       } catch (e) {}
       localGameRef.current = game;
       setBoardFen(game.fen());
+      setPosition(game.fen());
       setPgn(game.pgn());
 
       if (room.phase === 'FINISHED' && room.winnerId) {
@@ -591,7 +575,7 @@ export default function Room() {
         return;
       }
 
-      setStartPending(true);
+      // Keep pending true until we observe phase change or timeout
     } catch (e) {
       setMessage('Network error');
       setStartPending(false);
@@ -760,6 +744,12 @@ export default function Room() {
     }
   }
 
+  function formatMs(ms) {
+    const secs = Math.floor(ms / 1000);
+    const mins = Math.floor(secs / 60);
+    return `${mins}m ${secs % 60}s`;
+  }
+
   function Board({ fen }) {
     const [position, setPosition] = useState(fen || 'start');
     const [lastMove, setLastMove] = useState(null);
@@ -768,14 +758,14 @@ export default function Room() {
     const [selectedSquare, setSelectedSquare] = useState(null);
     const [legalMoves, setLegalMoves] = useState([]);
 
-    // Sync position when fen prop changes (from backend)
     useEffect(() => {
       if (fen && fen !== position) {
         setPosition(fen);
+        setSelectedSquare(null);
+        setLegalMoves([]);
       }
     }, [fen]);
 
-    // Track last move for highlighting
     useEffect(() => {
       if (state?.moves?.length > 0) {
         const last = state.moves[state.moves.length - 1];
@@ -789,248 +779,184 @@ export default function Room() {
 
     const customSquareStyles = useMemo(() => {
       const styles = {};
-
       if (lastMove?.length === 2) {
         styles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
         styles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
       }
-
-      // Always show highlights when there's a selection, regardless of turn
       if (selectedSquare) {
         styles[selectedSquare] = {
           backgroundColor: 'rgba(0, 123, 255, 0.5)',
           border: '2px solid #007bff'
         };
       }
-      
       legalMoves.forEach(move => {
         styles[move] = {
           backgroundColor: 'rgba(40, 167, 69, 0.4)',
           border: '2px solid #28a745'
         };
       });
-
-      console.log('Final customSquareStyles:', styles);
-      console.log('Debug - selectedSquare:', selectedSquare, 'legalMoves:', legalMoves);
       return styles;
     }, [lastMove, selectedSquare, legalMoves]);
 
     function playMoveSound() {
-      if (typeof window !== 'undefined' && window.Audio) {
-        try {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.frequency.value = 800;
-          osc.type = 'sine';
-          gain.gain.setValueAtTime(0.3, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-          osc.start();
-          osc.stop(ctx.currentTime + 0.1);
-        } catch (e) {}
-      }
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 800;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.1);
+      } catch (e) {}
     }
 
-  function onSquareClick(square) {
-    const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-    if (!playerColor) return;
+    async function onSquareClick(square) {
+      console.log('Square clicked:', square);
+    
+      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
+      if (!playerColor) return;
 
-    // Use the REAL game instance (with full move history)
-    const game = localGameRef.current;
-    if (!game) return;
+      const game = localGameRef.current;
+      if (!game) return;
 
-    const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+      if (turnLetter !== playerColor) return; // Not your turn
 
-    // Only allow interaction on your turn
-    if (turnLetter !== playerColor) return;
+      const piece = game.get(square);
 
-    const piece = game.get(square);
-
-    // If clicking the same square, deselect it
-    if (selectedSquare === square) {
-      console.log('Deselected square:', square);
-      setSelectedSquare(null);
-      setLegalMoves([]);
-      return;
-    }
-
-    // If we have a selection and clicking on a legal move, make the move
-    if (selectedSquare && legalMoves.includes(square)) {
-      console.log('Moving piece:', selectedSquare, '→', square);
-      const from = selectedSquare;
-      const to = square;
-
-      const piece = game.get(from);
-      const isPawn = piece && piece.type === 'p';
-      const isPromotion = isPawn && (to[1] === '8' || to[1] === '1');
-
-      if (isPromotion) {
-        setPendingPromotion({ source: from, target: to });
-        setShowPromotionModal(true);
+      // Deselect same square
+      if (selectedSquare === square) {
         setSelectedSquare(null);
         setLegalMoves([]);
         return;
       }
 
-      // Normal move
-      try {
-        const moved = game.move({ from, to });
-        if (!moved) return;
+      // If selected piece and clicking legal move
+      if (selectedSquare && legalMoves.includes(square)) {
+        const from = selectedSquare;
+        const to = square;
+        const pieceOnFrom = game.get(from);
+        const isPawn = pieceOnFrom && pieceOnFrom.type === 'p';
+        const targetRank = Number(to[1]);
+        const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
 
-        // Optimistic update
-        localGameRef.current = game;
-        setPosition(game.fen());
-        setBoardFen(game.fen());
-        setPgn(game.pgn());
-        playMoveSound();
+        if (needsPromotion) {
+          setPendingPromotion({ source: from, target: to });
+          setShowPromotionModal(true);
+          setSelectedSquare(null);
+          setLegalMoves([]);
+          return;
+        }
 
-        // Send to server
-        makeMoveUci(from + to).catch(e => {
-          console.error('Move sync failed:', e);
-          setPosition(fen || 'start'); // revert
-        });
-
-        // Clear selection
-        setSelectedSquare(null);
-        setLegalMoves([]);
-      } catch (e) {
-        console.error('Move failed:', e);
-        setSelectedSquare(null);
-        setLegalMoves([]);
-      }
-      return;
-    }
-
-    // Select piece if it's yours
-    if (piece && ((piece.color === 'w' && playerColor === 'white') || (piece.color === 'b' && playerColor === 'black'))) {
-      console.log('Selected piece:', piece.type, 'at', square);
-      setSelectedSquare(square);
-
-      // Calculate REAL legal moves from current game position
-      const moves = game.moves({ square, verbose: true }) || [];
-      const moveTargets = moves.map(m => m.to);
-      console.log('Legal moves:', moveTargets);
-
-      setLegalMoves(moveTargets);
-    } else {
-      // Clicked empty or opponent piece → clear selection
-      if (selectedSquare) {
-        console.log('Cleared selection');
-      }
-      setSelectedSquare(null);
-      setLegalMoves([]);
-    }
-  }
-
-    function onSquareRightClick(square) {
-      console.log('Right click on square:', square);
-      // Test if right clicks work
-    }
-
-    function onPieceDragBegin(piece, sourceSquare) {
-      console.log('Piece drag begin:', piece, sourceSquare);
-      // Test if drag events work
-    }
-
-    function onDrop(source, target, piece) {
-      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-      if (!playerColor) return false;
-
-      const game = localGameRef.current || new ChessJS();
-      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
-      if (turnLetter !== playerColor) return false; // Not your turn
-
-      const isPawn = piece[1].toLowerCase() === 'p';
-      const isPromotion = isPawn && (target[1] === '8' || target[1] === '1');
-
-      if (isPromotion) {
-        setPendingPromotion({ source, target });
-        setShowPromotionModal(true);
-        return false; // Wait for modal choice
-      }
-
-      // Normal move - optimistic update
-      try {
-        const moved = game.move({ from: source, to: target });
-        if (!moved) return false;
-
-        // Accept locally immediately
-        localGameRef.current = game;
-        setPosition(game.fen());
-        setBoardFen(game.fen());
-        setPgn(game.pgn());
-        playMoveSound();
-        
-        // Clear selection after move
-        setSelectedSquare(null);
-        setLegalMoves([]);
-
-        // Send to server in background
-        makeMoveUci(source + target).catch(e => {
-          console.error('Move sync failed:', e);
-          // Optional: revert position on failure
+        // Execute normal move
+        try {
+          const success = await makeMoveUci(from + to);
+          if (success) {
+            playMoveSound();
+            setSelectedSquare(null);
+            setLegalMoves([]);
+          } else {
+            // Server rejected → revert visual state
+            setPosition(fen || 'start');
+            setBoardFen(fen || 'start');
+          }
+        } catch (err) {
+          console.error('Move failed:', err);
           setPosition(fen || 'start');
-        });
-
-        return true;
-      } catch (e) {
-        return false;
+          setBoardFen(fen || 'start');
+        }
+        return;
       }
+
+      // Select own piece
+      if (piece && 
+          ((piece.color === 'w' && playerColor === 'white') || 
+           (piece.color === 'b' && playerColor === 'black'))) {
+        const moves = game.moves({ square, verbose: true }) || [];
+        const moveTargets = moves.map(m => m.to);
+        setSelectedSquare(square);
+        setLegalMoves(moveTargets);
+      } else {
+        // Clear selection on empty/opponent squares
+        setSelectedSquare(null);
+        setLegalMoves([]);
+      }
+    }
+
+    function onDrop(sourceSquare, targetSquare) {
+      // Disable drag-drop, rely only on click selection
+      return false;
     }
 
     function handlePromotion(promotionPiece) {
       if (!pendingPromotion) return;
-
       const { source, target } = pendingPromotion;
-      const uci = source + target + promotionPiece;
-
-      try {
-        const game = localGameRef.current || new ChessJS();
-        const moved = game.move({ from: source, to: target, promotion: promotionPiece });
-        if (!moved) return;
-
-        // Accept locally
-        localGameRef.current = game;
-        setPosition(game.fen());
-        setBoardFen(game.fen());
-        setPgn(game.pgn());
-        playMoveSound();
-
-        // Send to server
-        makeMoveUci(uci, promotionPiece).catch(e => {
-          console.error('Promotion sync failed:', e);
+      makeMoveUci(source + target + promotionPiece).then(success => {
+        if (success) {
+          setShowPromotionModal(false);
+          setPendingPromotion(null);
+          playMoveSound();
+          setSelectedSquare(null);
+          setLegalMoves([]);
+        } else {
+          // Server rejected → revert visual state
           setPosition(fen || 'start');
-        });
-
-        setShowPromotionModal(false);
-        setPendingPromotion(null);
-      } catch (e) {
-        console.error('Promotion failed:', e); // Fix: Added missing closing parenthesis
-      }
+          setBoardFen(fen || 'start');
+        }
+      }).catch(err => {
+        console.error('Promotion failed:', err);
+        setPosition(fen || 'start');
+        setBoardFen(fen || 'start');
+      });
     }
 
     return (
-      <Chessboard
-        key={position}
-        position={position}
-        onPieceDrop={onDrop}
-        onSquareRightClick={onSquareRightClick}
-        onPieceDragBegin={onPieceDragBegin}
-        onPieceClick={({ square, piece }) => {
-          console.log('React-chessboard onPieceClick fired:', square, piece ? `(${piece.type} ${piece.color})` : '(empty)');
-          onSquareClick(square);
-        }}
-        boardWidth={360}
-        arePiecesDraggable={true}
-        customDarkSquareStyle={{ backgroundColor: '#b58863' }}
-        customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
-        customSquareStyles={customSquareStyles}
-        animationDuration={300}
-      />
+      <>
+        <Chessboard
+          position={position}
+          onSquareClick={onSquareClick}
+          onPieceDrop={onDrop}
+          boardWidth={360}
+          arePiecesDraggable={false}
+          customDarkSquareStyle={{ backgroundColor: '#b58863' }}
+          customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
+          customSquareStyles={customSquareStyles}
+          animationDuration={300}
+        />
+        {showPromotionModal && pendingPromotion && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+          }}>
+            <div style={{
+              background: 'white', padding: '24px', borderRadius: '12px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)', textAlign: 'center'
+            }}>
+              <h3 style={{ margin: '0 0 16px' }}>Promote pawn to:</h3>
+              <div style={{ display: 'flex', gap: '16px' }}>
+                {['q', 'r', 'b', 'n'].map(piece => (
+                  <button
+                    key={piece}
+                    onClick={() => handlePromotion(piece)}
+                    style={{
+                      fontSize: '40px', padding: '12px 24px',
+                      background: '#f8f9fa', border: '1px solid #ccc',
+                      borderRadius: '8px', cursor: 'pointer', minWidth: '80px'
+                    }}
+                  >
+                    {piece === 'q' ? '♕' : piece === 'r' ? '♜' : piece === 'b' ? '♝' : '♞'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </>
     );
-
   }
 
   if (loading || joining || !state) {
