@@ -202,7 +202,15 @@ export default function Room() {
 
   async function autoJoin(playerId, playerName) {
     const backendId = getBackendRoomId();
-    if (!backendId) { setError('Missing room ID'); return; }
+    console.log('DEBUG: BASE URL:', BASE);
+    console.log('DEBUG: Backend ID:', backendId);
+    console.log('DEBUG: Full URL:', `${BASE}/rooms/${backendId}/join`);
+    
+    if (!backendId) { 
+      console.error('ERROR: Missing room ID');
+      setError('Missing room ID'); 
+      return; 
+    }
 
     try {
       const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
@@ -211,16 +219,21 @@ export default function Room() {
         body: JSON.stringify({ playerId, name: playerName }),
       });
 
+      console.log('DEBUG: Join response status:', res.status);
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        console.error('DEBUG: Join error:', err);
         setError('Failed to join: ' + (err.error || res.status));
         return;
       }
 
       const data = await res.json().catch(() => ({}));
+      console.log('DEBUG: Join response data:', data);
       setJoined(true);
       await fetchState();
     } catch (e) {
+      console.error('DEBUG: Network error:', e);
       setError('Network error joining room');
     } finally {
       setJoining(false);
