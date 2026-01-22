@@ -4,10 +4,6 @@ import { Chessboard } from 'react-chessboard';
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
-console.log('=== DEBUG INFO ===');
-console.log('BASE URL:', BASE);
-console.log('Room ID from URL:', typeof window !== 'undefined' ? window.location.pathname : 'server-side');
-
 let ChessJS = null;
 
 // Helper cookie functions
@@ -88,14 +84,11 @@ export default function Room() {
     }
     const pathId = m[1];
 
-    console.log('DEBUG: Extracted pathId:', pathId);
-
     if (!roomIdRef.current) {
       roomIdRef.current = pathId;
     }
 
     const currentRoomId = roomIdRef.current;
-    console.log('DEBUG: Final roomIdRef.current:', currentRoomId);
     if (!currentRoomId) {
       setError('Invalid room URL');
       return;
@@ -116,9 +109,7 @@ export default function Room() {
 
   const getBackendRoomId = () => {
     const rid = roomIdRef.current || roomId || '';
-    console.log('DEBUG: getBackendRoomId input rid:', rid);
     const result = rid.startsWith('room-') ? rid : (rid ? 'room-' + rid : null);
-    console.log('DEBUG: getBackendRoomId result:', result);
     return result;
   };
 
@@ -196,7 +187,6 @@ export default function Room() {
     if (ChessJS) return;
     import('chess.js').then((mod) => {
       ChessJS = mod.Chess || mod.default || mod;
-      console.log('Chess engine loaded');
     }).catch((e) => {
       console.error('Failed to load chess engine', e);
       setError('Failed to load chess engine');
@@ -212,12 +202,7 @@ export default function Room() {
 
   async function autoJoin(playerId, playerName) {
     const backendId = getBackendRoomId();
-    console.log('DEBUG: BASE URL:', BASE);
-    console.log('DEBUG: Backend ID:', backendId);
-    console.log('DEBUG: Full URL:', `${BASE}/rooms/${backendId}/join`);
-    
     if (!backendId) { 
-      console.error('ERROR: Missing room ID');
       setError('Missing room ID'); 
       return; 
     }
@@ -229,22 +214,17 @@ export default function Room() {
         body: JSON.stringify({ playerId, name: playerName }),
       });
 
-      console.log('DEBUG: Join response status:', res.status);
-
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        console.error('DEBUG: Join error:', err);
         setError('Failed to join: ' + (err.error || res.status));
         return;
       }
 
       const data = await res.json().catch(() => ({}));
-      console.log('DEBUG: Join response data:', data);
       setJoined(true);
-      setupWebSocket(); // Enable WebSocket after successful join
+      setupWebSocket();
       await fetchState();
     } catch (e) {
-      console.error('DEBUG: Network error:', e);
       setError('Network error joining room');
     } finally {
       setJoining(false);
@@ -261,9 +241,6 @@ export default function Room() {
     wsRef.current = new WebSocket(wsUrl);
 
     wsRef.current.onopen = () => {
-      console.log('WebSocket connected');
-      
-      // *** HEARTBEAT: Keep connection alive every 5s ***
       const heartbeat = setInterval(async () => {
         try {
           await fetch(`${BASE}/rooms/${getBackendRoomId()}/heartbeat`, {
@@ -276,8 +253,6 @@ export default function Room() {
         }
       }, 5000);
       wsRef.current.heartbeatInterval = heartbeat;
-      
-      // WebSocket short polling disabled - main polling useEffect handles it
     };
 
     wsRef.current.onmessage = (event) => {
@@ -303,7 +278,6 @@ export default function Room() {
     };
 
     wsRef.current.onclose = (event) => {
-      // *** CLEANUP HEARTBEAT ***
       if (wsRef.current && wsRef.current.heartbeatInterval) {
         clearInterval(wsRef.current.heartbeatInterval);
         wsRef.current.heartbeatInterval = null;
@@ -392,18 +366,12 @@ export default function Room() {
 
   async function fetchState() {
     const backendId = getBackendRoomId();
-    console.log('fetchState: Starting for ID', backendId);
     if (!backendId) {
-      console.error('fetchState: No backendId');
       return;
     }
 
-    console.log('fetchState: Full URL:', `${BASE}/rooms/${backendId}`);
-
     try {
       const res = await fetch(`${BASE}/rooms/${backendId}`);
-      console.log('fetchState: GET status', res.status);
-
       if (!res.ok) {
         if (res.status === 404) {
           setMessage('Room no longer exists — sending you back to lobby');
@@ -414,18 +382,12 @@ export default function Room() {
       }
 
       const data = await res.json();
-      console.log('fetchState: Raw response data:', data);
       const room = data.room || data;
-      console.log('fetchState: Parsed room:', room);
 
-      // Temporarily disable strict ID validation for debugging
       if (!room) {
-        console.warn('fetchState: Room validation failed - no room object');
         setError('Room not found');
         return;
       }
-
-      console.log('fetchState: State set successfully');
       updateLocalGameAndClocks(room);
       setState(room);
 
@@ -462,11 +424,9 @@ export default function Room() {
           } else if (room.result === 'checkmate') {
             setMessage('Checkmate');
           } else {
-            // Fallback for other finish reasons (e.g. disconnect_forfeit)
             setMessage('Game over');
           }
         } else {
-          // Finished with no winner (e.g. aborted game without result/reason)
           setMessage('Game over');
         }
       }
@@ -487,7 +447,7 @@ export default function Room() {
           await autoJoin(savedPid, savedName);
         }
       } catch (e) {
-        console.warn('Background rejoin attempt failed', e);
+        console.error('Background rejoin attempt failed', e);
       }
     } catch (e) {
       setError('Failed to load room state');
@@ -771,7 +731,6 @@ export default function Room() {
   }
 
   function Board({ fen }) {
-    const [position, setPosition] = useState(fen || 'start');
     const [lastMove, setLastMove] = useState(null);
     const [showPromotionModal, setShowPromotionModal] = useState(false);
     const [pendingPromotion, setPendingPromotion] = useState(null);
@@ -779,12 +738,21 @@ export default function Room() {
     const [legalMoves, setLegalMoves] = useState([]);
 
     useEffect(() => {
-      if (fen && fen !== position) {
-        setPosition(fen);
-        setSelectedSquare(null);
+      const game = localGameRef.current;
+      if (!game || !state?.colors) return;
+
+      const myColor = state.colors[playerIdRef.current];
+      const isMyTurn = game.turn() === (myColor === 'white' ? 'w' : 'b');
+
+      if (!isMyTurn) {
         setLegalMoves([]);
+        setSelectedSquare(null);
+        return;
       }
-    }, [fen]);
+
+      const moves = game.moves({ verbose: true });
+      setLegalMoves(moves.map(m => m.to));
+    }, [fen, state?.colors?.[playerIdRef.current], state?.phase]);
 
     useEffect(() => {
       if (state?.moves?.length > 0) {
@@ -799,24 +767,25 @@ export default function Room() {
 
     const customSquareStyles = useMemo(() => {
       const styles = {};
-      if (lastMove?.length === 2) {
-        styles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
-        styles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.4)' };
-      }
+
+      legalMoves.forEach(sq => {
+        styles[sq] = { backgroundColor: 'rgba(40, 167, 69, 0.2)' };
+      });
+
       if (selectedSquare) {
         styles[selectedSquare] = {
-          backgroundColor: 'rgba(0, 123, 255, 0.5)',
+          backgroundColor: 'rgba(0, 123, 255, 0.4)',
           border: '2px solid #007bff'
         };
       }
-      legalMoves.forEach(move => {
-        styles[move] = {
-          backgroundColor: 'rgba(40, 167, 69, 0.4)',
-          border: '2px solid #28a745'
-        };
-      });
+
+      if (lastMove?.length === 2) {
+        styles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.3)' };
+        styles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.3)' };
+      }
+
       return styles;
-    }, [lastMove, selectedSquare, legalMoves]);
+    }, [legalMoves, selectedSquare, lastMove]);
 
     function playMoveSound() {
       try {
@@ -835,8 +804,6 @@ export default function Room() {
     }
 
     async function onSquareClick(square) {
-      console.log('Square clicked:', square);
-    
       const playerColor = state?.colors?.[playerIdRef.current] ?? null;
       if (!playerColor) return;
 
@@ -844,18 +811,16 @@ export default function Room() {
       if (!game) return;
 
       const turnLetter = game.turn() === 'w' ? 'white' : 'black';
-      if (turnLetter !== playerColor) return; // Not your turn
+      if (turnLetter !== playerColor) return;
 
       const piece = game.get(square);
 
-      // Deselect same square
       if (selectedSquare === square) {
         setSelectedSquare(null);
         setLegalMoves([]);
         return;
       }
 
-      // If selected piece and clicking legal move
       if (selectedSquare && legalMoves.includes(square)) {
         const from = selectedSquare;
         const to = square;
@@ -872,27 +837,19 @@ export default function Room() {
           return;
         }
 
-        // Execute normal move
         try {
           const success = await makeMoveUci(from + to);
           if (success) {
             playMoveSound();
             setSelectedSquare(null);
             setLegalMoves([]);
-          } else {
-            // Server rejected → revert visual state
-            setPosition(fen || 'start');
-            setBoardFen(fen || 'start');
           }
         } catch (err) {
-          console.error('Move failed:', err);
-          setPosition(fen || 'start');
-          setBoardFen(fen || 'start');
+          // Move failed
         }
         return;
       }
 
-      // Select own piece
       if (piece && 
           ((piece.color === 'w' && playerColor === 'white') || 
            (piece.color === 'b' && playerColor === 'black'))) {
@@ -901,15 +858,45 @@ export default function Room() {
         setSelectedSquare(square);
         setLegalMoves(moveTargets);
       } else {
-        // Clear selection on empty/opponent squares
         setSelectedSquare(null);
         setLegalMoves([]);
       }
     }
 
     function onDrop(sourceSquare, targetSquare) {
-      // Disable drag-drop, rely only on click selection
-      return false;
+      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
+      if (!playerColor) return false;
+
+      const game = localGameRef.current;
+      if (!game) return false;
+
+      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+      if (turnLetter !== playerColor) return false;
+
+      const piece = game.get(sourceSquare);
+      if (!piece) return false;
+
+      const isPawn = piece.type === 'p';
+      const targetRank = Number(targetSquare[1]);
+      const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
+
+      if (needsPromotion) {
+        setPendingPromotion({ source: sourceSquare, target: targetSquare });
+        setShowPromotionModal(true);
+        return false;
+      }
+
+      makeMoveUci(sourceSquare + targetSquare).then(success => {
+        if (success) {
+          playMoveSound();
+          setSelectedSquare(null);
+          setLegalMoves([]);
+        }
+      }).catch(() => {
+        // Move failed
+      });
+
+      return true;
     }
 
     function handlePromotion(promotionPiece) {
@@ -922,26 +909,20 @@ export default function Room() {
           playMoveSound();
           setSelectedSquare(null);
           setLegalMoves([]);
-        } else {
-          // Server rejected → revert visual state
-          setPosition(fen || 'start');
-          setBoardFen(fen || 'start');
         }
-      }).catch(err => {
-        console.error('Promotion failed:', err);
-        setPosition(fen || 'start');
-        setBoardFen(fen || 'start');
+      }).catch(() => {
+        // Promotion failed
       });
     }
 
     return (
       <>
         <Chessboard
-          position={position}
+          position={fen || 'start'}
           onSquareClick={onSquareClick}
           onPieceDrop={onDrop}
           boardWidth={360}
-          arePiecesDraggable={false}
+          arePiecesDraggable={true}
           customDarkSquareStyle={{ backgroundColor: '#b58863' }}
           customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
           customSquareStyles={customSquareStyles}
