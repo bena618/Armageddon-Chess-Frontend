@@ -1,6 +1,7 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/router';
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Chessboard } from 'react-chessboard';
+import Head from 'next/head';
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
@@ -20,6 +21,377 @@ function setCookie(name, value, hours) {
   if (maxAge) cookie += `; max-age=${maxAge}`;
   document.cookie = cookie;
 }
+
+const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef, localGameRef, makeMoveUci }) {
+  const [lastMove, setLastMove] = useState(null);
+  const [showPromotionModal, setShowPromotionModal] = useState(false);
+  const [selectedSquare, setSelectedSquare] = useState(null);
+  const [legalMoves, setLegalMoves] = useState([]);
+
+  useEffect(() => {
+    // Only clear legal moves when it's not your turn
+    const game = localGameRef.current;
+    
+    if (!game || !colors) return;
+
+    const myColor = colors[playerIdRef.current];
+    const isMyTurn = game.turn() === (myColor === 'white' ? 'w' : 'b');
+
+    if (!isMyTurn) {
+      setLegalMoves([]);
+      setSelectedSquare(null);
+    }
+  }, [fen, phase, colors]);
+
+  useEffect(() => {
+    if (moves?.length > 0) {
+      const last = moves[moves.length - 1];
+      if (last?.move?.length >= 4) {
+        const from = last.move.slice(0, 2);
+        const to = last.move.slice(2, 4);
+        setLastMove([from, to]);
+      }
+    }
+  }, [moves]);
+
+  const customSquareStyles = useMemo(() => {
+    const styles = {};
+    
+    legalMoves.forEach(sq => {
+      styles[sq] = { backgroundColor: 'rgba(40, 167, 69, 0.2)' };
+    });
+
+    if (selectedSquare) {
+      styles[selectedSquare] = {
+        backgroundColor: 'rgba(0, 123, 255, 0.4)',
+        border: '2px solid #007bff'
+      };
+    }
+
+    if (lastMove?.length === 2) {
+      styles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.3)' };
+      styles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.3)' };
+    }
+
+    return styles;
+  }, [legalMoves, selectedSquare, lastMove]);
+
+  function playMoveSound() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 800;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.1);
+    } catch (e) {}
+  }
+
+  async function onSquareClick(square) {
+    const playerColor = colors?.[playerIdRef.current] ?? null;
+
+    const game = localGameRef.current;
+    if (!game) {
+      return;
+    }
+
+    const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+
+    if (turnLetter !== playerColor) {
+      return;
+    }
+
+    const piece = game.get(square);
+
+    if (selectedSquare === square) {
+      setSelectedSquare(null);
+      setLegalMoves([]);
+      return;
+    }
+
+    if (selectedSquare && legalMoves.includes(square)) {
+      const from = selectedSquare;
+      const to = square;
+      const pieceOnFrom = game.get(from);
+      const isPawn = pieceOnFrom && pieceOnFrom.type === 'p';
+      const targetRank = Number(to[1]);
+      const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
+
+      if (needsPromotion) {
+        setPendingPromotion({ source: from, target: to });
+        setShowPromotionModal(true);
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+
+      try {
+        const success = await makeMoveUci(from + to);
+        if (success) {
+          playMoveSound();
+          setSelectedSquare(null);
+          setLegalMoves([]);
+        }
+      } catch (err) {
+        console.error('Move failed:', err);
+      }
+      return;
+    }
+
+    if (piece && 
+        ((piece.color === 'w' && playerColor === 'white') || 
+         (piece.color === 'b' && playerColor === 'black'))) {
+      
+      // Calculate moves ONLY from the selected square
+      const moves = game.moves({ square, verbose: true }) || [];
+      const moveTargets = moves.map(m => m.to);
+      
+      setSelectedSquare(square);
+      setLegalMoves(moveTargets);
+    } else {
+      setSelectedSquare(null);
+      setLegalMoves([]);
+    }
+  }
+
+  function onDrop(sourceSquare, targetSquare) {
+    const playerColor = colors?.[playerIdRef.current] ?? null;
+    if (!playerColor) return false;
+
+    const game = localGameRef.current;
+    if (!game) return false;
+
+    const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+    if (turnLetter !== playerColor) return false;
+
+    const piece = game.get(sourceSquare);
+    if (!piece) return false;
+
+    const isPawn = piece.type === 'p';
+    const targetRank = Number(targetSquare[1]);
+    const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
+
+    if (needsPromotion) {
+      setPendingPromotion({ source: sourceSquare, target: targetSquare });
+      setShowPromotionModal(true);
+      return false;
+    }
+
+    makeMoveUci(sourceSquare + targetSquare).then(success => {
+      if (success) {
+        playMoveSound();
+        setSelectedSquare(null);
+        setLegalMoves([]);
+      }
+    }).catch(() => {
+      // Move failed
+    });
+
+    return true;
+  }
+
+  function handlePromotion(promotionPiece) {
+    if (!pendingPromotion) return;
+    const { source, target } = pendingPromotion;
+    makeMoveUci(source + target + promotionPiece).then(success => {
+      if (success) {
+        setShowPromotionModal(false);
+        setPendingPromotion(null);
+        playMoveSound();
+        setSelectedSquare(null);
+        setLegalMoves([]);
+      }
+    }).catch(() => {
+      // Promotion failed
+    });
+  }
+
+  return (
+    <>
+      {/* Manual chessboard with professional styling */}
+      <div style={{ 
+        display: 'grid',
+        gridTemplateColumns: 'repeat(8, 50px)',
+        gridTemplateRows: 'repeat(8, 50px)',
+        gap: '1px',
+        backgroundColor: '#333',
+        padding: '1px',
+        width: '400px',
+        height: '400px',
+        borderRadius: '4px',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
+      }}>
+          {[
+            'a8', 'b8', 'c8', 'd8', 'e8', 'f8', 'g8', 'h8',
+            'a7', 'b7', 'c7', 'd7', 'e7', 'f7', 'g7', 'h7',
+            'a6', 'b6', 'c6', 'd6', 'e6', 'f6', 'g6', 'h6',
+            'a5', 'b5', 'c5', 'd5', 'e5', 'f5', 'g5', 'h5',
+            'a4', 'b4', 'c4', 'd4', 'e4', 'f4', 'g4', 'h4',
+            'a3', 'b3', 'c3', 'd3', 'e3', 'f3', 'g3', 'h3',
+            'a2', 'b2', 'c2', 'd2', 'e2', 'f2', 'g2', 'h2',
+            'a1', 'b1', 'c1', 'd1', 'e1', 'f1', 'g1', 'h1'
+          ].map((square) => {
+            const game = localGameRef.current;
+            const piece = game ? game.get(square) : null;
+            const isLight = (square.charCodeAt(0) - 'a'.charCodeAt(0) + parseInt(square[1])) % 2 === 0;
+            
+            // Calculate highlighting
+            let bgColor = isLight ? '#f0d9b5' : '#b58863';
+            let borderStyle = 'none';
+            
+            if (selectedSquare === square) {
+              borderStyle = '2px solid #007bff';
+            } else if (legalMoves.includes(square)) {
+              borderStyle = '2px solid #dc3545';
+            }
+            
+            return (
+              <div
+                key={square}
+                draggable={!!piece}
+                onClick={() => onSquareClick(square)}
+                onDragStart={(e) => {
+                  const piece = game ? game.get(square) : null;
+                  if (!piece) return;
+                  e.dataTransfer.setData('text/plain', square);
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  const sourceSquare = e.dataTransfer.getData('text/plain');
+                  const targetSquare = square;
+                  
+                  if (sourceSquare && targetSquare && sourceSquare !== targetSquare) {
+                    const game = localGameRef.current;
+                    const playerColor = colors?.[playerIdRef.current] ?? null;
+                    
+                    if (!playerColor || !game) return false;
+
+                    const turnLetter = game.turn() === 'w' ? 'white' : 'black';
+                    if (turnLetter !== playerColor) return false;
+
+                    const piece = game.get(sourceSquare);
+                    if (!piece) return false;
+
+                    const isPawn = piece.type === 'p';
+                    const targetRank = Number(targetSquare[1]);
+                    const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
+
+                    if (needsPromotion) {
+                      setPendingPromotion({ source: sourceSquare, target: targetSquare });
+                      setShowPromotionModal(true);
+                      setSelectedSquare(null);
+                      setLegalMoves([]);
+                      return false;
+                    }
+
+                    try {
+                      const success = await makeMoveUci(sourceSquare + targetSquare);
+                      if (success) {
+                        playMoveSound();
+                        setSelectedSquare(null);
+                        setLegalMoves([]);
+                      }
+                    } catch (err) {
+                      console.error('Drag move failed:', err);
+                    }
+                  }
+                  return true;
+                }}
+                style={{
+                  backgroundColor: bgColor,
+                  border: borderStyle,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: piece ? 'grab' : 'pointer',
+                  fontSize: '36px',
+                  fontFamily: 'Arial Unicode MS, sans-serif',
+                  fontWeight: 'normal',
+                  userSelect: 'none',
+                  position: 'relative'
+                }}
+              >
+                {piece ? (
+                  <span style={{
+                    fontSize: '32px',
+                    lineHeight: '1',
+                    color: piece.color === 'w' ? '#ffffff' : '#000000',
+                    textShadow: piece.color === 'w' ? '0 0 1px rgba(0,0,0,0.8)' : '0 0 1px rgba(255,255,255,0.8)'
+                  }}>
+                    {piece.color === 'w' ? 
+                      (piece.type === 'p' ? '♟' : piece.type === 'r' ? '♖' : piece.type === 'n' ? '♘' : piece.type === 'b' ? '♗' : piece.type === 'q' ? '♕' : '♔') :
+                      (piece.type === 'p' ? '♙' : piece.type === 'r' ? '♜' : piece.type === 'n' ? '♞' : piece.type === 'b' ? '♝' : piece.type === 'q' ? '♛' : '♚')
+                    }
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      {showPromotionModal && pendingPromotion && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white', padding: '24px', borderRadius: '12px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)', textAlign: 'center'
+          }}>
+            <h3 style={{ margin: '0 0 16px' }}>Promote pawn to:</h3>
+            <div style={{ display: 'flex', gap: '16px' }}>
+              {['q', 'r', 'b', 'n'].map(piece => (
+                <button
+                  key={piece}
+                  onClick={() => handlePromotion(piece)}
+                  style={{
+                    fontSize: '40px', padding: '12px 24px',
+                    background: '#f8f9fa', border: '1px solid #ccc',
+                    borderRadius: '8px', cursor: 'pointer', minWidth: '80px'
+                  }}
+                >
+                  {piece === 'q' ? '♕' : piece === 'r' ? '♜' : piece === 'b' ? '♝' : '♞'}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+});
+
+// Memoized Board component that only re-renders when essential props change
+const MemoizedBoard = React.memo(function MemoizedBoard({ fen, colors, moves, phase, playerIdRef, localGameRef, makeMoveUci }) {
+  return (
+    <Board 
+      fen={fen}
+      colors={colors}
+      moves={moves}
+      phase={phase}
+      playerIdRef={playerIdRef}
+      localGameRef={localGameRef}
+      makeMoveUci={makeMoveUci}
+    />
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison function to prevent unnecessary re-renders
+  return (
+    prevProps.fen === nextProps.fen &&
+    prevProps.phase === nextProps.phase &&
+    JSON.stringify(prevProps.colors) === JSON.stringify(nextProps.colors) &&
+    JSON.stringify(prevProps.moves) === JSON.stringify(nextProps.moves)
+  );
+});
 
 export default function Room() {
   const router = useRouter();
@@ -61,6 +433,9 @@ export default function Room() {
   const roomIdRef = useRef(null);
   const [startPending, setStartPending] = useState(false);
 
+  // Memoize individual Board props to prevent unnecessary re-renders
+  const boardFenProp = useMemo(() => boardFen === 'start' ? 'start' : boardFen, [boardFen]);
+
   function getStoredPlayerId() {
     if (playerIdRef.current) return playerIdRef.current;
     if (typeof window !== 'undefined') {
@@ -94,6 +469,9 @@ export default function Room() {
       return;
     }
 
+    // Always fetch initial room state so unjoined players can see room info
+    fetchState();
+
     const savedName = localStorage.getItem('playerName') || getCookie('playerName');
     const savedPlayerId = localStorage.getItem('playerId') || getCookie('playerId');
 
@@ -110,7 +488,7 @@ export default function Room() {
   const getBackendRoomId = () => {
     const rid = roomIdRef.current || roomId || '';
     const result = rid.startsWith('room-') ? rid : (rid ? 'room-' + rid : null);
-    return result;
+        return result;
   };
 
   function Countdown({ deadline, totalMs, onExpire }) {
@@ -202,33 +580,39 @@ export default function Room() {
 
   async function autoJoin(playerId, playerName) {
     const backendId = getBackendRoomId();
+        
     if (!backendId) { 
       setError('Missing room ID'); 
+      setLoading(false); 
       return; 
     }
 
     try {
-      const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
+            const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
       });
 
+      
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setError('Failed to join: ' + (err.error || res.status));
+                setError('Failed to join: ' + (err.error || res.status));
+        setLoading(false); 
         return;
       }
 
       const data = await res.json().catch(() => ({}));
-      setJoined(true);
+            setJoined(true);
+            setLoading(false); 
       setupWebSocket();
       await fetchState();
     } catch (e) {
+      console.error('Network error in autoJoin:', e);
       setError('Network error joining room');
+      setLoading(false); 
     } finally {
       setJoining(false);
-      setLoading(false);
     }
   }
 
@@ -366,12 +750,13 @@ export default function Room() {
 
   async function fetchState() {
     const backendId = getBackendRoomId();
-    if (!backendId) {
-      return;
+        if (!backendId) {
+            return;
     }
 
     try {
-      const res = await fetch(`${BASE}/rooms/${backendId}`);
+            const res = await fetch(`${BASE}/rooms/${backendId}`);
+            
       if (!res.ok) {
         if (res.status === 404) {
           setMessage('Room no longer exists — sending you back to lobby');
@@ -382,13 +767,14 @@ export default function Room() {
       }
 
       const data = await res.json();
-      const room = data.room || data;
+            const room = data.room || data;
 
       if (!room) {
         setError('Room not found');
         return;
       }
-      updateLocalGameAndClocks(room);
+      
+            updateLocalGameAndClocks(room);
       setState(room);
 
       if (data.startExpired || room.closed) {
@@ -490,12 +876,16 @@ export default function Room() {
   useEffect(() => {
     if (!roomId || !joined) return;
 
-    // Only start polling if WebSocket is NOT connected
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      fetchState();
+        
+    // For local development: always poll to ensure second player loads
+    const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+    
+    if (isLocalDev || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            fetchState();
       const interval = setInterval(fetchState, 2000);
       return () => clearInterval(interval);
-    }
+    } else {
+          }
   }, [roomId, joined]);
 
   useEffect(() => {
@@ -515,14 +905,22 @@ export default function Room() {
         if (safeWhite <= 0 && (!state?.winnerId)) {
           const winner = state?.players?.find(p => state?.colors?.[p.id] === 'black');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
+          if (!timeForfeitSentRef.current) {
+            timeForfeitSentRef.current = true;
+            sendTimeForfeit(state.players.find(p => state.colors && state.colors[p.id] === 'white')?.id || null);
+          }
         } else if (safeBlack <= 0 && (!state?.winnerId)) {
           const winner = state?.players?.find(p => state?.colors?.[p.id] === 'white');
           setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
+          if (!timeForfeitSentRef.current) {
+            timeForfeitSentRef.current = true;
+            sendTimeForfeit(state.players.find(p => state.colors && state.colors[p.id] === 'black')?.id || null);
+          }
         }
       }
     }, 2000);
     return () => clearInterval(t);
-  }, [state, gameOverInfo]);
+  }, [state, gameOverInfo, timeForfeitSentRef, sendTimeForfeit]);
 
   useEffect(() => {
     return () => {
@@ -627,7 +1025,7 @@ export default function Room() {
     } catch (e) { setError('Network error'); }
   }
 
-  async function makeMoveUci(uci, promotion) {
+  const makeMoveUci = useCallback(async function(uci, promotion) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return false; }
     if (!ChessJS) { setError('Chess engine not loaded'); return false; }
@@ -654,22 +1052,22 @@ export default function Room() {
 
     let moved;
     try {
-      moved = test.move({ from, to, promotion: promotion || 'q' });
+      moved = test.move({ from, to, promotion: needsPromotion ? (promotion || 'q') : undefined });
     } catch (e) {
       console.error('Chess engine rejected move:', e);
-      setError('Illegal move');
+      // No error message - just return false to keep same player's turn
       return false;
     }
     if (!moved) {
-      setError('Illegal move');
+      // No error message - just return false to keep same player's turn
       return false;
     }
 
     try {
-      game.move({ from, to, promotion: promotion || 'q' });
+      game.move({ from, to, promotion: needsPromotion ? (promotion || 'q') : undefined });
     } catch (e) {
       console.error('Failed to apply move to local game:', e);
-      setError('Illegal move');
+      // No error message - just return false to keep same player's turn
       return false;
     }
     localGameRef.current = game;
@@ -722,7 +1120,7 @@ export default function Room() {
       setError('Network error');
       return false;
     }
-  }
+  }, [state]);
 
   function formatMs(ms) {
     const secs = Math.floor(ms / 1000);
@@ -730,238 +1128,8 @@ export default function Room() {
     return `${mins}m ${secs % 60}s`;
   }
 
-  function Board({ fen }) {
-    const [lastMove, setLastMove] = useState(null);
-    const [showPromotionModal, setShowPromotionModal] = useState(false);
-    const [pendingPromotion, setPendingPromotion] = useState(null);
-    const [selectedSquare, setSelectedSquare] = useState(null);
-    const [legalMoves, setLegalMoves] = useState([]);
-
-    useEffect(() => {
-      const game = localGameRef.current;
-      if (!game || !state?.colors) return;
-
-      const myColor = state.colors[playerIdRef.current];
-      const isMyTurn = game.turn() === (myColor === 'white' ? 'w' : 'b');
-
-      if (!isMyTurn) {
-        setLegalMoves([]);
-        setSelectedSquare(null);
-        return;
-      }
-
-      const moves = game.moves({ verbose: true });
-      setLegalMoves(moves.map(m => m.to));
-    }, [fen, state?.colors?.[playerIdRef.current], state?.phase]);
-
-    useEffect(() => {
-      if (state?.moves?.length > 0) {
-        const last = state.moves[state.moves.length - 1];
-        if (last?.move?.length >= 4) {
-          const from = last.move.slice(0, 2);
-          const to = last.move.slice(2, 4);
-          setLastMove([from, to]);
-        }
-      }
-    }, [state?.moves]);
-
-    const customSquareStyles = useMemo(() => {
-      const styles = {};
-
-      legalMoves.forEach(sq => {
-        styles[sq] = { backgroundColor: 'rgba(40, 167, 69, 0.2)' };
-      });
-
-      if (selectedSquare) {
-        styles[selectedSquare] = {
-          backgroundColor: 'rgba(0, 123, 255, 0.4)',
-          border: '2px solid #007bff'
-        };
-      }
-
-      if (lastMove?.length === 2) {
-        styles[lastMove[0]] = { backgroundColor: 'rgba(255,255,0,0.3)' };
-        styles[lastMove[1]] = { backgroundColor: 'rgba(255,255,0,0.3)' };
-      }
-
-      return styles;
-    }, [legalMoves, selectedSquare, lastMove]);
-
-    function playMoveSound() {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 800;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.3, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.1);
-      } catch (e) {}
-    }
-
-    async function onSquareClick(square) {
-      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-      if (!playerColor) return;
-
-      const game = localGameRef.current;
-      if (!game) return;
-
-      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
-      if (turnLetter !== playerColor) return;
-
-      const piece = game.get(square);
-
-      if (selectedSquare === square) {
-        setSelectedSquare(null);
-        setLegalMoves([]);
-        return;
-      }
-
-      if (selectedSquare && legalMoves.includes(square)) {
-        const from = selectedSquare;
-        const to = square;
-        const pieceOnFrom = game.get(from);
-        const isPawn = pieceOnFrom && pieceOnFrom.type === 'p';
-        const targetRank = Number(to[1]);
-        const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
-
-        if (needsPromotion) {
-          setPendingPromotion({ source: from, target: to });
-          setShowPromotionModal(true);
-          setSelectedSquare(null);
-          setLegalMoves([]);
-          return;
-        }
-
-        try {
-          const success = await makeMoveUci(from + to);
-          if (success) {
-            playMoveSound();
-            setSelectedSquare(null);
-            setLegalMoves([]);
-          }
-        } catch (err) {
-          // Move failed
-        }
-        return;
-      }
-
-      if (piece && 
-          ((piece.color === 'w' && playerColor === 'white') || 
-           (piece.color === 'b' && playerColor === 'black'))) {
-        const moves = game.moves({ square, verbose: true }) || [];
-        const moveTargets = moves.map(m => m.to);
-        setSelectedSquare(square);
-        setLegalMoves(moveTargets);
-      } else {
-        setSelectedSquare(null);
-        setLegalMoves([]);
-      }
-    }
-
-    function onDrop(sourceSquare, targetSquare) {
-      const playerColor = state?.colors?.[playerIdRef.current] ?? null;
-      if (!playerColor) return false;
-
-      const game = localGameRef.current;
-      if (!game) return false;
-
-      const turnLetter = game.turn() === 'w' ? 'white' : 'black';
-      if (turnLetter !== playerColor) return false;
-
-      const piece = game.get(sourceSquare);
-      if (!piece) return false;
-
-      const isPawn = piece.type === 'p';
-      const targetRank = Number(targetSquare[1]);
-      const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
-
-      if (needsPromotion) {
-        setPendingPromotion({ source: sourceSquare, target: targetSquare });
-        setShowPromotionModal(true);
-        return false;
-      }
-
-      makeMoveUci(sourceSquare + targetSquare).then(success => {
-        if (success) {
-          playMoveSound();
-          setSelectedSquare(null);
-          setLegalMoves([]);
-        }
-      }).catch(() => {
-        // Move failed
-      });
-
-      return true;
-    }
-
-    function handlePromotion(promotionPiece) {
-      if (!pendingPromotion) return;
-      const { source, target } = pendingPromotion;
-      makeMoveUci(source + target + promotionPiece).then(success => {
-        if (success) {
-          setShowPromotionModal(false);
-          setPendingPromotion(null);
-          playMoveSound();
-          setSelectedSquare(null);
-          setLegalMoves([]);
-        }
-      }).catch(() => {
-        // Promotion failed
-      });
-    }
-
-    return (
-      <>
-        <Chessboard
-          position={fen || 'start'}
-          onSquareClick={onSquareClick}
-          onPieceDrop={onDrop}
-          boardWidth={360}
-          arePiecesDraggable={true}
-          customDarkSquareStyle={{ backgroundColor: '#b58863' }}
-          customLightSquareStyle={{ backgroundColor: '#f0d9b5' }}
-          customSquareStyles={customSquareStyles}
-          animationDuration={300}
-        />
-        {showPromotionModal && pendingPromotion && (
-          <div style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-          }}>
-            <div style={{
-              background: 'white', padding: '24px', borderRadius: '12px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.4)', textAlign: 'center'
-            }}>
-              <h3 style={{ margin: '0 0 16px' }}>Promote pawn to:</h3>
-              <div style={{ display: 'flex', gap: '16px' }}>
-                {['q', 'r', 'b', 'n'].map(piece => (
-                  <button
-                    key={piece}
-                    onClick={() => handlePromotion(piece)}
-                    style={{
-                      fontSize: '40px', padding: '12px 24px',
-                      background: '#f8f9fa', border: '1px solid #ccc',
-                      borderRadius: '8px', cursor: 'pointer', minWidth: '80px'
-                    }}
-                  >
-                    {piece === 'q' ? '♕' : piece === 'r' ? '♜' : piece === 'b' ? '♝' : '♞'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </>
-    );
-  }
-
   if (loading || joining || !state) {
-    return (
+        return (
       <div className="container">
         {joining ? 'Joining room...' : (!state ? 'Loading room state...' : 'Loading...')}
       </div>
@@ -974,7 +1142,14 @@ export default function Room() {
   const isMyTurn = state.clocks && myColor && state.clocks.turn === myColor;
 
   return (
-    <main className="container">
+    <>
+      <Head>
+        <link
+          href="https://fonts.googleapis.com/css2?family=Noto+Chess:wght@400;700&display=swap"
+          rel="stylesheet"
+        />
+      </Head>
+      <main className="container">
       <h2>Room {roomIdRef.current || roomId || '...'}</h2>
 
       <div className="share">
@@ -1143,7 +1318,15 @@ export default function Room() {
                   borderRadius: 8,
                   boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
                 }}>
-                  <Board fen={boardFen === 'start' ? 'start' : boardFen} />
+                  <MemoizedBoard 
+                    fen={boardFenProp}
+                    colors={state?.colors}
+                    moves={state?.moves}
+                    phase={state?.phase}
+                    playerIdRef={playerIdRef}
+                    localGameRef={localGameRef}
+                    makeMoveUci={makeMoveUci}
+                  />
                 </div>
               </div>
 
@@ -1212,5 +1395,6 @@ export default function Room() {
         </section>
       )}
     </main>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'export',
+  // Comment out export for local development
+  // output: 'export',
   trailingSlash: false, 
   images: {
     unoptimized: true,
