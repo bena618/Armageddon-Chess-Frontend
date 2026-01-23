@@ -215,17 +215,23 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
     <>
       {/* Manual chessboard with professional styling */}
       <div style={{ 
-        display: 'grid',
-        gridTemplateColumns: 'repeat(8, 50px)',
-        gridTemplateRows: 'repeat(8, 50px)',
-        gap: '1px',
-        backgroundColor: '#333',
-        padding: '1px',
-        width: '400px',
-        height: '400px',
-        borderRadius: '4px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
+        backgroundColor: '#000000',
+        padding: '0px',
+        display: 'inline-block'
       }}>
+        <div style={{ 
+          display: 'grid',
+          gridTemplateColumns: 'repeat(8, 50px)',
+          gridTemplateRows: 'repeat(8, 50px)',
+          gap: '0px',
+          backgroundColor: '#000000',
+          padding: '0px',
+          width: '400px',
+          height: '400px',
+          borderRadius: '4px',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+          border: '1px solid #000000'
+        }}>
           {[
             'a8', 'b8', 'c8', 'd8', 'e8', 'f8', 'g8', 'h8',
             'a7', 'b7', 'c7', 'd7', 'e7', 'f7', 'g7', 'h7',
@@ -338,6 +344,7 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
             );
           })}
         </div>
+      </div>
       {showPromotionModal && pendingPromotion && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -1149,7 +1156,7 @@ export default function Room() {
           rel="stylesheet"
         />
       </Head>
-      <main className="container">
+      <main className="container" style={{ backgroundColor: 'transparent' }}>
       <h2>Room {roomIdRef.current || roomId || '...'}</h2>
 
       <div className="share">
@@ -1314,7 +1321,6 @@ export default function Room() {
                 <div style={{ 
                   width: 440, 
                   padding: '8px', 
-                  background: '#f0f0f0', 
                   borderRadius: 8,
                   boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
                 }}>
