@@ -486,7 +486,19 @@ export default function Room() {
       setName(savedName);
       playerIdRef.current = savedPlayerId;
       setLoading(true);  // Set loading to true before autoJoin
-      autoJoin(savedPlayerId, savedName);
+      // First fetch room state to check if we're already in it
+      fetchState().then(() => {
+        const isInRoom = state?.players?.some(p => p.id === savedPlayerId);
+        if (isInRoom) {
+          setJoined(true);
+          setLoading(false);
+          setupWebSocket();
+        } else {
+          autoJoin(savedPlayerId, savedName);
+        }
+      }).catch((error) => {
+        autoJoin(savedPlayerId, savedName);
+      });
     } else {
       setLoading(false);
     }
@@ -589,33 +601,36 @@ export default function Room() {
     const backendId = getBackendRoomId();
         
     if (!backendId) { 
-      setError('Missing room ID'); 
-      setLoading(false); 
-      return; 
+      setError('Invalid room ID');
+      setLoading(false);
+      return;
     }
 
     try {
-            const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
+      const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId, name: playerName }),
       });
 
-      
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-                setError('Failed to join: ' + (err.error || res.status));
+        setError('Failed to join: ' + (err.error || res.status));
         setLoading(false); 
         return;
       }
 
       const data = await res.json().catch(() => ({}));
-            setJoined(true);
-            setLoading(false); 
+      if (!data.room) {
+        setError('No room returned from server');
+        setLoading(false);
+        return;
+      }
+      setJoined(true);
+      setLoading(false); 
       setupWebSocket();
       await fetchState();
     } catch (e) {
-      console.error('Network error in autoJoin:', e);
       setError('Network error joining room');
       setLoading(false); 
     } finally {
@@ -640,7 +655,7 @@ export default function Room() {
             body: JSON.stringify({ playerId: playerIdRef.current })
           });
         } catch (e) {
-          console.error('Heartbeat failed:', e);
+          // Heartbeat failed
         }
       }, 5000);
       wsRef.current.heartbeatInterval = heartbeat;
@@ -664,7 +679,7 @@ export default function Room() {
           updateLocalGameAndClocks(room);
         }
       } catch (e) {
-        console.error('WS message error:', e);
+        // WS message error
       }
     };
 
@@ -717,39 +732,29 @@ export default function Room() {
       }
     }
 
-    if (room.clocks) {
-        const now = Date.now();
+    const last = room.clocks?.lastTickAt || now;
+    const elapsed = Math.max(0, now - last);
+    const whiteMs = (room.clocks?.whiteRemainingMs || 0) - ((room.clocks?.turn === 'white') ? elapsed : 0);
+    const blackMs = (room.clocks?.blackRemainingMs || 0) - ((room.clocks?.turn === 'black') ? elapsed : 0);
+    const safeWhite = Math.max(0, whiteMs);
+    const safeBlack = Math.max(0, blackMs);
+    setLiveWhiteMs(safeWhite);
+    setLiveBlackMs(safeBlack);
 
-      if (room.phase === 'FINISHED' && room.clocks.frozenAt) {
-        setLiveWhiteMs(room.clocks.whiteRemainingMs || 0);
-        setLiveBlackMs(room.clocks.blackRemainingMs || 0);
-        return;
-      }
-
-      const last = room.clocks.lastTickAt || now;
-      const elapsed = Math.max(0, now - last);
-      const whiteMs = (room.clocks.whiteRemainingMs || 0) - ((room.clocks.turn === 'white') ? elapsed : 0);
-      const blackMs = (room.clocks.blackRemainingMs || 0) - ((room.clocks.turn === 'black') ? elapsed : 0);
-      const safeWhite = Math.max(0, whiteMs);
-      const safeBlack = Math.max(0, blackMs);
-      setLiveWhiteMs(safeWhite);
-      setLiveBlackMs(safeBlack);
-
-      if (room.phase === 'PLAYING' && !gameOverInfo) {
-        if (safeWhite <= 0 && (!room.winnerId)) {
-          const winner = room.players.find(p => room.colors && room.colors[p.id] === 'black');
-          setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
-          if (!timeForfeitSentRef.current) {
-            timeForfeitSentRef.current = true;
-            sendTimeForfeit(room.players.find(p => room.colors && room.colors[p.id] === 'white')?.id || null);
-          }
-        } else if (safeBlack <= 0 && (!room.winnerId)) {
-          const winner = room.players.find(p => room.colors && room.colors[p.id] === 'white');
-          setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
-          if (!timeForfeitSentRef.current) {
-            timeForfeitSentRef.current = true;
-            sendTimeForfeit(room.players.find(p => room.colors && room.colors[p.id] === 'black')?.id || null);
-          }
+    if (room.phase === 'PLAYING' && !gameOverInfo) {
+      if (safeWhite <= 0 && (!room.winnerId)) {
+        const winner = room.players.find(p => room.colors && room.colors[p.id] === 'black');
+        setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'black' });
+        if (!timeForfeitSentRef.current) {
+          timeForfeitSentRef.current = true;
+          sendTimeForfeit(room.players.find(p => room.colors && room.colors[p.id] === 'white')?.id || null);
+        }
+      } else if (safeBlack <= 0 && (!room.winnerId)) {
+        const winner = room.players.find(p => room.colors && room.colors[p.id] === 'white');
+        setGameOverInfo({ winnerId: winner ? winner.id : null, winnerName: winner ? winner.name : null, color: 'white' });
+        if (!timeForfeitSentRef.current) {
+          timeForfeitSentRef.current = true;
+          sendTimeForfeit(room.players.find(p => room.colors && room.colors[p.id] === 'black')?.id || null);
         }
       }
     }
@@ -840,10 +845,10 @@ export default function Room() {
           await autoJoin(savedPid, savedName);
         }
       } catch (e) {
-        console.error('Background rejoin attempt failed', e);
+        setError('Background rejoin attempt failed');
       }
     } catch (e) {
-      setError('Failed to load room state');
+      // Silently handle fetch errors - room usually loads fine
     }
   }
 
@@ -858,7 +863,9 @@ export default function Room() {
       });
       if (!res.ok) return;
       await fetchState();
-    } catch (e) {}
+    } catch (e) {
+      // Time forfeit failed
+    }
   }
 
   async function sendRematchVote(agree) {
@@ -872,12 +879,32 @@ export default function Room() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (data.error === 'already_voted') {
+          setError('You have already voted - votes cannot be changed');
+          return;
+        }
         setError('Failed to send rematch vote');
         return;
       }
-      setMessage(data.rematchStarted ? 'Rematch started' : 'Vote recorded');
-      await fetchState();
-    } catch (e) { setError('Network error'); }
+      
+      if (data.rematchStarted) {
+        setMessage('Rematch started!');
+        await fetchState();
+      } else if (data.voteResult === 'no_vote') {
+        setMessage('Someone voted No - returning to lobby');
+        setTimeout(() => {
+          router.replace('/');
+        }, 2000);
+      } else if (data.voteResult === 'waiting_for_opponent') {
+        setMessage('You voted Yes - waiting for opponent or will join quick match if they decline');
+        await fetchState();
+      } else {
+        setMessage('Vote recorded');
+        await fetchState();
+      }
+    } catch (e) { 
+      setError('Network error'); 
+    }
   }
 
   useEffect(() => {

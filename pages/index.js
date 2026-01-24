@@ -36,17 +36,21 @@ export default function Home() {
     setLoading(true);
     try {
       const playerId = getOrCreatePlayerId();
+      const playerName = name.trim();
       const res = await fetch(`${BASE}/rooms/join-next`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, name: name.trim() }),
+        body: JSON.stringify({ playerId, name: playerName }),
       });
       if (!res.ok) {
         if (res.status === 404) {
+          // Save player name BEFORE creating room
+          localStorage.setItem('playerName', playerName);
+          
           const createRes = await fetch(`${BASE}/rooms`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ private: false }),
+            body: JSON.stringify({ private: false, creatorName: playerName, creatorPlayerId: playerId }),
           });
           if (!createRes.ok) {
             const err = await createRes.json().catch(() => ({ error: 'unknown' }));
