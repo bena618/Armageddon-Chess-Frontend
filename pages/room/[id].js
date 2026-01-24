@@ -1159,10 +1159,12 @@ export default function Room() {
       <main className="container" style={{ backgroundColor: 'transparent' }}>
       <h2>Room {roomIdRef.current || roomId || '...'}</h2>
 
-      <div className="share">
-        <input readOnly value={typeof window !== 'undefined' ? window.location.href.split('?')[0] : ''} />
-        <button onClick={copyLink}>Copy Link</button>
-      </div>
+      {(state?.private || (typeof window !== 'undefined' && window.location.search.includes('private=true'))) && (
+        <div className="share">
+          <input readOnly value={typeof window !== 'undefined' ? window.location.href.split('?')[0] : ''} />
+          <button onClick={copyLink}>Copy Link</button>
+        </div>
+      )}
 
       {message && <div style={{ color: 'green', marginTop: 8 }}>{message}</div>}
       {error && <div style={{ color: 'red', marginTop: 8 }}>{error}</div>}

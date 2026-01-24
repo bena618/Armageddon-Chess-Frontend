@@ -12,7 +12,6 @@ export default function Home() {
   const autoJoinTimerRef = useRef(null);
   const autoJoinIntervalRef = useRef(null);
 
-
   function getOrCreatePlayerId() {
     if (typeof window === 'undefined') return crypto.randomUUID();
     const existing = window.localStorage.getItem('playerId');
@@ -22,8 +21,6 @@ export default function Home() {
     return fresh;
   }
 
-
-  // Pre-fill name from query param (e.g., from timeout redirect)
   useEffect(() => {
     const { name: queryName } = router.query;
     if (queryName) {
@@ -31,84 +28,7 @@ export default function Home() {
     }
   }, [router.query]);
 
-  async function create() {
-    if (!name.trim()) {
-      alert('Please enter your name');
-      return;
-    }
-
-    setLoading(true);
-
-    // If already on a /room/ URL, try to join it instead of creating new
-    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/room/')) {
-      const pathId = window.location.pathname.split('/').filter(Boolean)[1];
-      const backendId = pathId.startsWith('room-') ? pathId : `room-${pathId}`;
-
-      const playerId = getOrCreatePlayerId();
-
-      try {
-        const res = await fetch(`${BASE}/rooms/${backendId}/join`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ playerId, name: name.trim() }),
-        });
-
-        if (res.ok) {
-          localStorage.setItem('playerName', name.trim());
-          localStorage.setItem('playerId', playerId);
-          router.replace(window.location.pathname);
-          return;
-        }
-      } catch (e) {
-        console.error('Direct join failed', e);
-      }
-
-      // Fallback: show countdown and reload
-      setAutoJoinCountdown(8);
-      setAutoJoinPending(true);
-      autoJoinTimerRef.current = setTimeout(() => window.location.reload(), 8000);
-      autoJoinIntervalRef.current = setInterval(() => {
-        setAutoJoinCountdown(c => c > 0 ? c - 1 : 0);
-      }, 1000);
-      setLoading(false);
-      return;
-    }
-
-    // Normal room creation
-    try {
-      const res = await fetch(`${BASE}/rooms`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'unknown' }));
-        alert('Failed to create room: ' + (err.error || res.status));
-        return;
-      }
-
-      const data = await res.json();
-      const roomId = data.roomId || data.meta?.roomId;
-      if (!roomId) {
-        alert('No room ID returned');
-        return;
-      }
-
-      const playerId = getOrCreatePlayerId();
-      localStorage.setItem('playerName', name.trim());
-
-      const displayId = roomId.replace(/^room-/, '');
-      router.push(`/room/${displayId}`);
-    } catch (e) {
-      console.error(e);
-      alert('Network error creating room');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function quickMatch() {
+  async function playPublic() {
     if (!name.trim()) {
       alert('Please enter your name');
       return;
@@ -122,22 +42,131 @@ export default function Home() {
         body: JSON.stringify({ playerId, name: name.trim() }),
       });
       if (!res.ok) {
+        if (res.status === 404) {
+          const createRes = await fetch(`${BASE}/rooms`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ private: false }),
+          });
+          if (!createRes.ok) {
+            const err = await createRes.json().catch(() => ({ error: 'unknown' }));
+            alert('Failed to create room: ' + (err.error || createRes.status));
+            return;
+          }
+          const data = await createRes.json();
+          const roomId = data.roomId || data.meta?.roomId;
+          if (!roomId) {
+            alert('No room ID returned');
+            return;
+          }
+          const displayId = roomId.replace(/^room-/, '');
+          router.push(`/room/${displayId}`);
+          return;
+        }
         const err = await res.json().catch(() => ({}));
-        alert('No available games: ' + (err.error || res.status));
+        alert('Quick match error: ' + (err.error || res.status));
         return;
       }
+
       const data = await res.json();
+      
+      if (data.error) {
+        if (data.error === 'no_lobby_rooms') {
+          const createRes = await fetch(`${BASE}/rooms`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ private: false }),
+          });
+          if (!createRes.ok) {
+            const err = await createRes.json().catch(() => ({ error: 'unknown' }));
+            alert('Failed to create room: ' + (err.error || createRes.status));
+            return;
+          }
+          const createData = await createRes.json();
+          const roomId = createData.roomId || createData.meta?.roomId;
+          if (!roomId) {
+            alert('No room ID returned');
+            return;
+          }
+          const displayId = roomId.replace(/^room-/, '');
+          router.push(`/room/${displayId}`);
+          return;
+        }
+        alert('Quick match error: ' + data.error);
+        return;
+      }
+      
       const room = data.room || data;
+      
+      if (room.error) {
+        if (room.error === 'room_too_old' || room.error === 'no_lobby_rooms') {
+          const createRes = await fetch(`${BASE}/rooms`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ private: false }),
+          });
+          if (!createRes.ok) {
+            const err = await createRes.json().catch(() => ({ error: 'unknown' }));
+            alert('Failed to create room: ' + (err.error || createRes.status));
+            return;
+          }
+          const createData = await createRes.json();
+          const roomId = createData.roomId || createData.meta?.roomId;
+          if (!roomId) {
+            alert('No room ID returned');
+            return;
+          }
+          const displayId = roomId.replace(/^room-/, '');
+          router.push(`/room/${displayId}`);
+          return;
+        }
+        alert('Quick match error: ' + room.error);
+        return;
+      }
+      
       if (!room?.roomId) {
         alert('No room returned');
         return;
       }
       localStorage.setItem('playerName', name.trim());
-
       const displayId = room.roomId.replace(/^room-/, '');
       router.push(`/room/${displayId}`);
     } catch (e) {
-      alert('Network error joining quick match');
+      alert('Network error joining game');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function playPrivate() {
+    if (!name.trim()) {
+      alert('Please enter your name');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`${BASE}/rooms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ private: true }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'unknown' }));
+        alert('Failed to create room: ' + (err.error || res.status));
+        return;
+      }
+      const data = await res.json();
+      const roomId = data.roomId || data.meta?.roomId;
+      if (!roomId) {
+        alert('No room ID returned');
+        return;
+      }
+      const playerId = getOrCreatePlayerId();
+      localStorage.setItem('playerName', name.trim());
+      const displayId = roomId.replace(/^room-/, '');
+      router.push(`/room/${displayId}?private=true`);
+    } catch (e) {
+      alert('Network error creating room');
     } finally {
       setLoading(false);
     }
@@ -165,23 +194,23 @@ export default function Home() {
         placeholder="Your name"
         value={name}
         onChange={e => setName(e.target.value)}
-        onKeyDown={e => e.key === 'Enter' && create()}
+        onKeyDown={e => e.key === 'Enter' && playPublic()}
       />
 
       <div className="actions">
         <button
-          onClick={create}
+          onClick={playPublic}
           disabled={loading || !name.trim()}
         >
-          {loading ? 'Creating...' : 'Play'}
+          {loading ? 'Joining...' : 'Play Public'}
         </button>
 
         <button
-          onClick={quickMatch}
+          onClick={playPrivate}
           disabled={loading || !name.trim()}
           style={{ marginLeft: 8 }}
         >
-          {loading ? 'Joining...' : 'Quick Match'}
+          {loading ? 'Creating...' : 'Play Private'}
         </button>
       </div>
     </main>
