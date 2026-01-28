@@ -7,7 +7,6 @@ const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
 let ChessJS = null;
 
-// Helper cookie functions
 function getCookie(name) {
   if (typeof document === 'undefined') return null;
   const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()\[\]\\\/\\+^])/g, '\\$1') + '=([^;]*)'));
@@ -25,11 +24,11 @@ function setCookie(name, value, hours) {
 const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef, localGameRef, makeMoveUci }) {
   const [lastMove, setLastMove] = useState(null);
   const [showPromotionModal, setShowPromotionModal] = useState(false);
+  const [pendingPromotion, setPendingPromotion] = useState(null);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [legalMoves, setLegalMoves] = useState([]);
 
   useEffect(() => {
-    // Only clear legal moves when it's not your turn
     const game = localGameRef.current;
     
     if (!game || !colors) return;
@@ -147,7 +146,6 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
         ((piece.color === 'w' && playerColor === 'white') || 
          (piece.color === 'b' && playerColor === 'black'))) {
       
-      // Calculate moves ONLY from the selected square
       const moves = game.moves({ square, verbose: true }) || [];
       const moveTargets = moves.map(m => m.to);
       
@@ -189,7 +187,6 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
         setLegalMoves([]);
       }
     }).catch(() => {
-      // Move failed
     });
 
     return true;
@@ -207,7 +204,6 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
         setLegalMoves([]);
       }
     }).catch(() => {
-      // Promotion failed
     });
   }
 
@@ -246,7 +242,6 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
             const piece = game ? game.get(square) : null;
             const isLight = (square.charCodeAt(0) - 'a'.charCodeAt(0) + parseInt(square[1])) % 2 === 0;
             
-            // Calculate highlighting
             let bgColor = isLight ? '#f0d9b5' : '#b58863';
             let borderStyle = 'none';
             
@@ -377,7 +372,6 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
   );
 });
 
-// Memoized Board component that only re-renders when essential props change
 const MemoizedBoard = React.memo(function MemoizedBoard({ fen, colors, moves, phase, playerIdRef, localGameRef, makeMoveUci }) {
   return (
     <Board 
@@ -391,7 +385,6 @@ const MemoizedBoard = React.memo(function MemoizedBoard({ fen, colors, moves, ph
     />
   );
 }, (prevProps, nextProps) => {
-  // Custom comparison function to prevent unnecessary re-renders
   return (
     prevProps.fen === nextProps.fen &&
     prevProps.phase === nextProps.phase &&
@@ -403,7 +396,6 @@ const MemoizedBoard = React.memo(function MemoizedBoard({ fen, colors, moves, ph
 export default function Room() {
   const router = useRouter();
   
-  // Safe room ID from URL path (works during static export and client-side)
   const getRoomId = () => {
     if (typeof window !== 'undefined') {
       const path = window.location.pathname;
@@ -413,13 +405,14 @@ export default function Room() {
     return null;
   };
 
-  const roomId = getRoomId() || router.query.id; // Fallback for runtime
+  const roomId = getRoomId() || router.query.id;
 
   const [state, setState] = useState(null);
   const [name, setName] = useState('');
   const [joined, setJoined] = useState(false);
   const [joining, setJoining] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showNameInput, setShowNameInput] = useState(false);
   const [error, setError] = useState(null);
   const [bidMinutes, setBidMinutes] = useState('0');
   const [bidSeconds, setBidSeconds] = useState('0');
@@ -440,7 +433,6 @@ export default function Room() {
   const roomIdRef = useRef(null);
   const [startPending, setStartPending] = useState(false);
 
-  // Memoize individual Board props to prevent unnecessary re-renders
   const boardFenProp = useMemo(() => boardFen === 'start' ? 'start' : boardFen, [boardFen]);
 
   function getStoredPlayerId() {
@@ -454,7 +446,6 @@ export default function Room() {
     return null;
   }
 
-  // Lock room ID from path on first mount (for refresh persistence)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -476,7 +467,6 @@ export default function Room() {
       return;
     }
 
-    // Always fetch initial room state so unjoined players can see room info
     fetchState();
 
     const savedName = localStorage.getItem('playerName') || getCookie('playerName');
@@ -485,8 +475,7 @@ export default function Room() {
     if (savedName && savedPlayerId) {
       setName(savedName);
       playerIdRef.current = savedPlayerId;
-      setLoading(true);  // Set loading to true before autoJoin
-      // First fetch room state to check if we're already in it
+      setLoading(true);
       fetchState().then(() => {
         const isInRoom = state?.players?.some(p => p.id === savedPlayerId);
         if (isInRoom) {
@@ -500,6 +489,7 @@ export default function Room() {
         autoJoin(savedPlayerId, savedName);
       });
     } else {
+      setShowNameInput(true);
       setLoading(false);
     }
   }, []);
@@ -509,6 +499,26 @@ export default function Room() {
     const result = rid.startsWith('room-') ? rid : (rid ? 'room-' + rid : null);
         return result;
   };
+
+  function handleNameSubmit(playerName) {
+    if (!playerName.trim()) {
+      alert('Please enter your name');
+      return;
+    }
+    
+    const playerId = crypto.randomUUID();
+    localStorage.setItem('playerId', playerId);
+    localStorage.setItem('playerName', playerName.trim());
+    setCookie('playerId', playerId, 24 * 7);
+    setCookie('playerName', playerName.trim(), 24 * 7);
+    
+    setName(playerName.trim());
+    playerIdRef.current = playerId;
+    setShowNameInput(false);
+    setLoading(true);
+    
+    autoJoin(playerId, playerName.trim());
+  }
 
   function Countdown({ deadline, totalMs, onExpire }) {
     const [secs, setSecs] = useState(() => deadline ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null);
@@ -615,6 +625,15 @@ export default function Room() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        
+        if (res.status === 400 && (err.error === 'room_full' || err.error === 'not_in_lobby')) {
+          alert('This room is already full or the game has started. You will be redirected to the lobby.');
+          setTimeout(() => {
+            router.push('/');
+          }, 2000);
+          return;
+        }
+        
         setError('Failed to join: ' + (err.error || res.status));
         setLoading(false); 
         return;
@@ -655,7 +674,6 @@ export default function Room() {
             body: JSON.stringify({ playerId: playerIdRef.current })
           });
         } catch (e) {
-          // Heartbeat failed
         }
       }, 5000);
       wsRef.current.heartbeatInterval = heartbeat;
@@ -679,7 +697,6 @@ export default function Room() {
           updateLocalGameAndClocks(room);
         }
       } catch (e) {
-        // WS message error
       }
     };
 
@@ -786,6 +803,17 @@ export default function Room() {
         return;
       }
       
+      const savedPlayerId = localStorage.getItem('playerId') || getCookie('playerId');
+      const isInRoom = savedPlayerId && room.players?.some(p => p.id === savedPlayerId);
+      
+      if (room.players?.length >= room.maxPlayers && !isInRoom) {
+        alert('This room is already full. You will be redirected to the lobby.');
+        setTimeout(() => {
+          router.push('/');
+        }, 2000);
+        return;
+      }
+      
             updateLocalGameAndClocks(room);
       setState(room);
 
@@ -848,7 +876,6 @@ export default function Room() {
         setError('Background rejoin attempt failed');
       }
     } catch (e) {
-      // Silently handle fetch errors - room usually loads fine
     }
   }
 
@@ -864,7 +891,6 @@ export default function Room() {
       if (!res.ok) return;
       await fetchState();
     } catch (e) {
-      // Time forfeit failed
     }
   }
 
@@ -910,8 +936,6 @@ export default function Room() {
   useEffect(() => {
     if (!roomId || !joined) return;
 
-        
-    // For local development: always poll to ensure second player loads
     const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
     
     if (isLocalDev || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
@@ -1000,7 +1024,6 @@ export default function Room() {
         return;
       }
 
-      // Keep pending true until we observe phase change or timeout
     } catch (e) {
       setMessage('Network error');
       setStartPending(false);
@@ -1089,11 +1112,9 @@ export default function Room() {
       moved = test.move({ from, to, promotion: needsPromotion ? (promotion || 'q') : undefined });
     } catch (e) {
       console.error('Chess engine rejected move:', e);
-      // No error message - just return false to keep same player's turn
       return false;
     }
     if (!moved) {
-      // No error message - just return false to keep same player's turn
       return false;
     }
 
@@ -1101,7 +1122,6 @@ export default function Room() {
       game.move({ from, to, promotion: needsPromotion ? (promotion || 'q') : undefined });
     } catch (e) {
       console.error('Failed to apply move to local game:', e);
-      // No error message - just return false to keep same player's turn
       return false;
     }
     localGameRef.current = game;
@@ -1166,6 +1186,88 @@ export default function Room() {
         return (
       <div className="container">
         {joining ? 'Joining room...' : (!state ? 'Loading room state...' : 'Loading...')}
+      </div>
+    );
+  }
+
+  if (showNameInput) {
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0,0,0,0.8)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000
+      }}>
+        <div style={{
+          background: 'white',
+          padding: '32px',
+          borderRadius: '8px',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          maxWidth: '400px',
+          width: '90%'
+        }}>
+          <h2 style={{ marginBottom: '16px', textAlign: 'center' }}>Enter Your Name</h2>
+          <input
+            type="text"
+            placeholder="Your name"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleNameSubmit(e.target.value);
+              }
+            }}
+            style={{
+              width: '100%',
+              padding: '12px',
+              fontSize: '16px',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              marginBottom: '16px',
+              boxSizing: 'border-box'
+            }}
+          />
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => {
+                const input = document.querySelector('input[placeholder="Your name"]');
+                if (input) handleNameSubmit(input.value);
+              }}
+              style={{
+                flex: 1,
+                padding: '12px 24px',
+                fontSize: '16px',
+                background: '#007bff',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Join Room
+            </button>
+            <button
+              onClick={() => router.push('/')}
+              style={{
+                flex: 1,
+                padding: '12px 24px',
+                fontSize: '16px',
+                background: '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Back
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

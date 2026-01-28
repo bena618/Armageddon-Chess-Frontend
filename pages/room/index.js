@@ -39,7 +39,6 @@ export default function RoomIndex() {
   }, [id]);
 
   async function autoJoin(playerId, playerName) {
-    // ensure we use the current URL-derived id (defensive)
     const parts = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean) : [];
     const pathId = parts[1] || id;
     const backendId = getBackendRoomIdFromDisplay(pathId);
@@ -63,9 +62,7 @@ export default function RoomIndex() {
       }
 
       setJoined(true);
-      // Immediately fetch state to update UI
       await fetchState();
-      // force a client-side navigation refresh to ensure the room UI (bidding/etc) mounts
       try {
         const p = window.location.pathname;
         router.replace(p + '?_joined=' + Date.now());
