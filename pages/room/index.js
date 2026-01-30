@@ -18,6 +18,8 @@ export default function RoomIndex() {
   const [joined, setJoined] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [ws, setWs] = useState(null);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
 
   function getBackendRoomIdFromDisplay(displayId) {
     if (!displayId) return null;
@@ -107,13 +109,70 @@ export default function RoomIndex() {
     }
   }
 
+  function connectWebSocket(playerId) {
+    if (!id || !playerId) return;
+
+    const backendId = getBackendRoomIdFromDisplay(id);
+    const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${backendId}?playerId=${playerId}`;
+    
+    console.log('Connecting WebSocket:', wsUrl);
+    const websocket = new WebSocket(wsUrl);
+
+    websocket.onopen = () => {
+      console.log('WebSocket connected');
+      setWs(websocket);
+      setReconnectAttempts(0);
+      setError(null);
+    };
+
+    websocket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('WebSocket message:', message);
+        
+        if (message.type === 'init' || message.type === 'update') {
+          setState(message.room);
+        }
+      } catch (e) {
+        console.error('Failed to parse WebSocket message:', e);
+      }
+    };
+
+    websocket.onclose = (event) => {
+      console.log('WebSocket closed:', event.code, event.reason);
+      setWs(null);
+      
+      // Attempt reconnection with exponential backoff
+      if (event.code !== 1000 && reconnectAttempts < 5) {
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1})`);
+        setReconnectAttempts(prev => prev + 1);
+        setTimeout(() => connectWebSocket(playerId), delay);
+      }
+    };
+
+    websocket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setError('WebSocket connection error');
+    };
+
+    return websocket;
+  }
+
   useEffect(() => {
     if (!id || !joined) return;
 
-    const interval = setInterval(fetchState, 2000);
-    fetchState();
+    const playerId = localStorage.getItem('playerId');
+    if (!playerId) return;
 
-    return () => clearInterval(interval);
+    const websocket = connectWebSocket(playerId);
+
+    return () => {
+      if (ws) {
+        ws.close(1000, 'Component unmounting');
+        setWs(null);
+      }
+    };
   }, [id, joined]);
 
   function copyLink() {
@@ -153,6 +212,8 @@ export default function RoomIndex() {
       {joined && (
         <section className="state">
           <h3>Room State</h3>
+          {error && <p style={{ color: 'red' }}>{error}</p>}
+          {reconnectAttempts > 0 && <p style={{ color: 'orange' }}>Reconnecting... (attempt {reconnectAttempts})</p>}
           <pre>
             {state
               ? JSON.stringify(

@@ -18,6 +18,8 @@ export default function Home() {
   const [autoJoinCountdown, setAutoJoinCountdown] = useState(0);
   const [queueStatus, setQueueStatus] = useState({});
   const [isQueued, setIsQueued] = useState(false);
+  const [queueStartTime, setQueueStartTime] = useState(null);
+  const [queueTimeRemaining, setQueueTimeRemaining] = useState(null);
   const autoJoinTimerRef = useRef(null);
   const autoJoinIntervalRef = useRef(null);
 
@@ -37,10 +39,9 @@ export default function Home() {
     }
   }, [router.query]);
 
-  // Heartbeat to keep player alive in queues
   useEffect(() => {
     const playerId = localStorage.getItem('playerId');
-    if (!playerId) return;
+    if (!playerId || !isQueued) return;
 
     const heartbeat = setInterval(async () => {
       try {
@@ -50,15 +51,13 @@ export default function Home() {
           body: JSON.stringify({ playerId }),
         });
       } catch (e) {
-        // Silent fail - heartbeat is not critical
+        console.error(e);
       }
-    }, 60000); // Every minute
+    }, 300000);
 
-    // Cleanup on unmount
     return () => clearInterval(heartbeat);
-  }, []);
+  }, [isQueued]);
 
-  // Helper function for wait time display
   const getWaitMessage = (estimateData) => {
     if (!estimateData) return ' • No estimate';
     
@@ -95,7 +94,29 @@ export default function Home() {
     }
   };
 
-  // Update queue status every 30 seconds, or every 1 second if there are countdowns
+  // Queue timeout management (20 minutes max)
+  useEffect(() => {
+    if (!isQueued || !queueStartTime) return;
+
+    const updateRemainingTime = () => {
+      const elapsed = Date.now() - queueStartTime;
+      const remaining = Math.max(0, 20 * 60 * 1000 - elapsed); // 20 minutes
+      setQueueTimeRemaining(remaining);
+
+      if (remaining === 0) {
+        // Auto-remove from queue after 20 minutes
+        cancelQueue();
+        alert('You\'ve been in queue for 20 minutes and have been automatically removed. Please rejoin if you still want to play.');
+      }
+    };
+
+    updateRemainingTime();
+    const interval = setInterval(updateRemainingTime, 1000);
+
+    return () => clearInterval(interval);
+  }, [isQueued, queueStartTime]);
+
+  // Update queue status every 60 seconds, or every 5 seconds if there are countdowns
   useEffect(() => {
     fetchQueueStatus();
     
@@ -103,7 +124,7 @@ export default function Home() {
       const hasCountdowns = Object.values(queueStatus).some(status => 
         status?.estimate?.type === 'countdown'
       );
-      return hasCountdowns ? 1000 : 30000; // 1s for countdowns, 30s otherwise
+      return hasCountdowns ? 5000 : 60000; // 5s for countdowns, 60s otherwise
     };
     
     const interval = setInterval(fetchQueueStatus, updateInterval());
@@ -113,7 +134,7 @@ export default function Home() {
       clearInterval(interval);
       const newInterval = setInterval(fetchQueueStatus, updateInterval());
       return newInterval;
-    }, 5000);
+    }, 10000); // Check every 10 seconds instead of 5
     
     return () => {
       clearInterval(interval);
@@ -133,6 +154,8 @@ export default function Home() {
         body: JSON.stringify({ playerId }),
       });
       setIsQueued(false);
+      setQueueStartTime(null);
+      setQueueTimeRemaining(null);
       alert('You left the queue');
     } catch (e) {
       alert('Failed to leave queue');
@@ -217,6 +240,7 @@ export default function Home() {
       
       if (data.queued) {
         setIsQueued(true);
+        setQueueStartTime(Date.now());
         alert(`You're in queue for ${time} minutes. Position: ${data.queuePosition || 1}. You'll be matched automatically!`);
         setLoading(false);
         
@@ -314,6 +338,7 @@ export default function Home() {
       
       if (data.queued) {
         setIsQueued(true);
+        setQueueStartTime(Date.now());
         alert(`You're in queues for: ${data.joinedQueues.join(', ')} minutes. You'll be matched automatically!`);
         setLoading(false);
         
@@ -678,6 +703,11 @@ export default function Home() {
                 </button>
                 <span style={{ marginLeft: 12, fontSize: '12px', color: '#666' }}>
                   You're currently in queue - you'll be matched automatically!
+                  {queueTimeRemaining !== null && (
+                    <span style={{ color: '#ff6b6b', fontWeight: 'bold' }}>
+                      {' '}Time remaining: {Math.ceil(queueTimeRemaining / 60000)}m {Math.floor((queueTimeRemaining % 60000) / 1000)}s
+                    </span>
+                  )}
                 </span>
               </div>
             )}
