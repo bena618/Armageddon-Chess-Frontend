@@ -221,6 +221,13 @@ export default function RoomIndex() {
                     phase: state?.phase,
                     players: state?.players,
                     bids: state?.bids ? Object.keys(state.bids) : [],
+                    currentPicker: state?.currentPicker ? 
+                      (state.currentPicker === 'winner' ? 
+                        state.players?.find(p => p.id === state.winnerId)?.name || 'Winner' :
+                        state.players?.find(p => p.id === state.loserId)?.name || 'Loser') 
+                      : null,
+                    winnerId: state?.winnerId,
+                    loserId: state?.loserId,
                   },
                   null,
                   2

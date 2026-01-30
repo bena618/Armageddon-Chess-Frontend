@@ -21,12 +21,18 @@ function setCookie(name, value, hours) {
   document.cookie = cookie;
 }
 
-const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef, localGameRef, makeMoveUci }) {
+const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef, localGameRef, makeMoveUci, setError }) {
   const [lastMove, setLastMove] = useState(null);
   const [showPromotionModal, setShowPromotionModal] = useState(false);
   const [pendingPromotion, setPendingPromotion] = useState(null);
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [legalMoves, setLegalMoves] = useState([]);
+
+  // Function to reset selection state
+  const resetSelection = useCallback(() => {
+    setSelectedSquare(null);
+    setLegalMoves([]);
+  }, []);
 
   useEffect(() => {
     const game = localGameRef.current;
@@ -130,11 +136,10 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
       }
 
       try {
-        const success = await makeMoveUci(from + to);
+        const success = await makeMoveUci(from + to, null, resetSelection);
         if (success) {
           playMoveSound();
-          setSelectedSquare(null);
-          setLegalMoves([]);
+          resetSelection();
         }
       } catch (err) {
         console.error('Move failed:', err);
@@ -180,11 +185,10 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
       return false;
     }
 
-    makeMoveUci(sourceSquare + targetSquare).then(success => {
+    makeMoveUci(sourceSquare + targetSquare, null, resetSelection).then(success => {
       if (success) {
         playMoveSound();
-        setSelectedSquare(null);
-        setLegalMoves([]);
+        resetSelection();
       }
     }).catch(() => {
     });
@@ -195,13 +199,12 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
   function handlePromotion(promotionPiece) {
     if (!pendingPromotion) return;
     const { source, target } = pendingPromotion;
-    makeMoveUci(source + target + promotionPiece).then(success => {
+    makeMoveUci(source + target + promotionPiece, null, resetSelection).then(success => {
       if (success) {
         setShowPromotionModal(false);
         setPendingPromotion(null);
         playMoveSound();
-        setSelectedSquare(null);
-        setLegalMoves([]);
+        resetSelection();
       }
     }).catch(() => {
     });
@@ -283,6 +286,16 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
                     const piece = game.get(sourceSquare);
                     if (!piece) return false;
 
+                    // Check if move is legal before proceeding
+                    const moves = game.moves({ square: sourceSquare, verbose: true }) || [];
+                    const legalTargets = moves.map(m => m.to);
+                    if (!legalTargets.includes(targetSquare)) {
+                      // Show error for illegal drag move
+                      setError('Illegal move - try again');
+                      setTimeout(() => setError(null), 3000);
+                      return false;
+                    }
+
                     const isPawn = piece.type === 'p';
                     const targetRank = Number(targetSquare[1]);
                     const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
@@ -296,14 +309,14 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
                     }
 
                     try {
-                      const success = await makeMoveUci(sourceSquare + targetSquare);
+                      const success = await makeMoveUci(sourceSquare + targetSquare, null, resetSelection);
                       if (success) {
                         playMoveSound();
-                        setSelectedSquare(null);
-                        setLegalMoves([]);
+                        resetSelection();
                       }
                     } catch (err) {
                       console.error('Drag move failed:', err);
+                      // Error is already handled in makeMoveUci, no need to duplicate
                     }
                   }
                   return true;
@@ -351,19 +364,27 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
           }}>
             <h3 style={{ margin: '0 0 16px' }}>Promote pawn to:</h3>
             <div style={{ display: 'flex', gap: '16px' }}>
-              {['q', 'r', 'b', 'n'].map(piece => (
-                <button
-                  key={piece}
-                  onClick={() => handlePromotion(piece)}
-                  style={{
-                    fontSize: '40px', padding: '12px 24px',
-                    background: '#f8f9fa', border: '1px solid #ccc',
-                    borderRadius: '8px', cursor: 'pointer', minWidth: '80px'
-                  }}
-                >
-                  {piece === 'q' ? '♕' : piece === 'r' ? '♜' : piece === 'b' ? '♝' : '♞'}
-                </button>
-              ))}
+              {['q', 'r', 'b', 'n'].map(piece => {
+                const game = localGameRef.current;
+                const isWhiteTurn = game?.turn() === 'w';
+                const pieceSymbol = piece === 'q' ? (isWhiteTurn ? '♕' : '♛') : 
+                                   piece === 'r' ? (isWhiteTurn ? '♖' : '♜') : 
+                                   piece === 'b' ? (isWhiteTurn ? '♗' : '♝') : 
+                                   (isWhiteTurn ? '♘' : '♞');
+                return (
+                  <button
+                    key={piece}
+                    onClick={() => handlePromotion(piece)}
+                    style={{
+                      fontSize: '40px', padding: '12px 24px',
+                      background: '#f8f9fa', border: '1px solid #ccc',
+                      borderRadius: '8px', cursor: 'pointer', minWidth: '80px'
+                    }}
+                  >
+                    {pieceSymbol}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -372,7 +393,7 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
   );
 });
 
-const MemoizedBoard = React.memo(function MemoizedBoard({ fen, colors, moves, phase, playerIdRef, localGameRef, makeMoveUci }) {
+const MemoizedBoard = React.memo(function MemoizedBoard({ fen, colors, moves, phase, playerIdRef, localGameRef, makeMoveUci, setError }) {
   return (
     <Board 
       fen={fen}
@@ -382,6 +403,7 @@ const MemoizedBoard = React.memo(function MemoizedBoard({ fen, colors, moves, ph
       playerIdRef={playerIdRef}
       localGameRef={localGameRef}
       makeMoveUci={makeMoveUci}
+      setError={setError}
     />
   );
 }, (prevProps, nextProps) => {
@@ -917,10 +939,21 @@ export default function Room() {
         setMessage('Rematch started!');
         await fetchState();
       } else if (data.voteResult === 'no_vote') {
-        setMessage('Someone voted No - returning to lobby');
-        setTimeout(() => {
-          router.replace('/');
-        }, 2000);
+        // Check if this player voted yes - if so, redirect to queue
+        const playerVote = data.votes?.[playerIdRef.current];
+        if (playerVote === true) {
+          // Yes voter goes to queue
+          setMessage('Opponent declined rematch - you\'re back in queue');
+          setTimeout(() => {
+            router.replace('/');
+          }, 2000);
+        } else {
+          // No voter goes to lobby
+          setMessage('You voted No - returning to lobby');
+          setTimeout(() => {
+            router.replace('/');
+          }, 2000);
+        }
       } else if (data.voteResult === 'waiting_for_opponent') {
         setMessage('You voted Yes - waiting for opponent or will join quick match if they decline');
         await fetchState();
@@ -1082,14 +1115,14 @@ export default function Room() {
     } catch (e) { setError('Network error'); }
   }
 
-  const makeMoveUci = useCallback(async function(uci, promotion) {
+  const makeMoveUci = useCallback(async function(uci, promotion, resetSelection) {
     const playerId = playerIdRef.current;
     if (!playerId) { setError('Missing player id'); return false; }
     if (!ChessJS) { setError('Chess engine not loaded'); return false; }
     const game = localGameRef.current || new ChessJS();
     const from = uci.slice(0,2);
     const to = uci.slice(2,4);
-    const finalUci = promotion ? `${from}${to}${promotion}` : uci;
+    const promotionPiece = promotion || (uci.length >= 5 ? uci[4] : undefined);
 
     const playerColor = state?.colors?.[playerId] ?? null;
     if (!playerColor) { setError('Unknown player color'); return false; }
@@ -1102,24 +1135,34 @@ export default function Room() {
     const targetRank = Number(to[1]);
     const needsPromotion = isPawn && (targetRank === 8 || targetRank === 1);
 
-    if (needsPromotion && !promotion) {
+    if (needsPromotion && uci.length === 4) {
       setPromotionPending({ from, to, uciBase: `${from}${to}` });
       return false;
     }
 
     let moved;
     try {
-      moved = test.move({ from, to, promotion: needsPromotion ? (promotion || 'q') : undefined });
+      moved = test.move({ from, to, promotion: promotionPiece });
     } catch (e) {
       console.error('Chess engine rejected move:', e);
+      // Show user-friendly error for illegal moves
+      setError('Illegal move - try again');
+      setTimeout(() => setError(null), 3000); // Clear error after 3 seconds
+      // Reset board selection state
+      if (resetSelection) resetSelection();
       return false;
     }
     if (!moved) {
+      // Show user-friendly error for illegal moves
+      setError('Illegal move - try again');
+      setTimeout(() => setError(null), 3000); // Clear error after 3 seconds
+      // Reset board selection state
+      if (resetSelection) resetSelection();
       return false;
     }
 
     try {
-      game.move({ from, to, promotion: needsPromotion ? (promotion || 'q') : undefined });
+      game.move({ from, to, promotion: promotionPiece });
     } catch (e) {
       console.error('Failed to apply move to local game:', e);
       return false;
@@ -1139,10 +1182,11 @@ export default function Room() {
 
     const backendId = getBackendRoomId();
     try {
+      const moveUci = promotionPiece ? `${from}${to}${promotionPiece}` : `${from}${to}`;
       const res = await fetch(`${BASE}/rooms/${backendId}/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId, move: finalUci }),
+        body: JSON.stringify({ playerId, move: moveUci }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -1463,6 +1507,7 @@ export default function Room() {
                     playerIdRef={playerIdRef}
                     localGameRef={localGameRef}
                     makeMoveUci={makeMoveUci}
+                    setError={setError}
                   />
                 </div>
               </div>

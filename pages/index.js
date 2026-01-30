@@ -22,6 +22,7 @@ export default function Home() {
   const [queueTimeRemaining, setQueueTimeRemaining] = useState(null);
   const autoJoinTimerRef = useRef(null);
   const autoJoinIntervalRef = useRef(null);
+  const matchCheckIntervalRef = useRef(null);
 
   function getOrCreatePlayerId() {
     if (typeof window === 'undefined') return crypto.randomUUID();
@@ -34,10 +35,69 @@ export default function Home() {
 
   useEffect(() => {
     const { name: queryName } = router.query;
-    if (queryName) {
-      setName(decodeURIComponent(queryName));
-    }
+    if (queryName) setName(decodeURIComponent(queryName));
   }, [router.query]);
+
+  useEffect(() => {
+    const playerId = localStorage.getItem('playerId');
+    if (!playerId) return;
+
+    const checkExistingQueue = async () => {
+      try {
+        const res = await fetch(`${BASE}/queue/checkMatch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.inQueue) {
+            setIsQueued(true);
+            setQueueStartTime(Date.now());
+            setGameType('public');
+            const playerName = localStorage.getItem('playerName');
+            if (playerName) setName(playerName);
+
+            if (matchCheckIntervalRef.current) clearInterval(matchCheckIntervalRef.current);
+
+            matchCheckIntervalRef.current = setInterval(async () => {
+              try {
+                const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ playerId }),
+                });
+
+                if (matchRes.ok) {
+                  const matchData = await matchRes.json();
+
+                  if (matchData.matched && matchData.roomId) {
+                    clearInterval(matchCheckIntervalRef.current);
+                    const displayId = matchData.roomId.replace(/^room-/, '');
+                    router.push(`/room/${displayId}`);
+                    return;
+                  }
+
+                  if (!matchData.inQueue && !matchData.matched) {
+                    clearInterval(matchCheckIntervalRef.current);
+                    setIsQueued(false);
+                    return;
+                  }
+                }
+              } catch (e) {}
+            }, 10000);
+
+            setTimeout(() => {
+              if (matchCheckIntervalRef.current) clearInterval(matchCheckIntervalRef.current);
+            }, 120000);
+          }
+        }
+      } catch (e) {}
+    };
+
+    checkExistingQueue();
+  }, []);
 
   useEffect(() => {
     const playerId = localStorage.getItem('playerId');
@@ -50,9 +110,7 @@ export default function Home() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ playerId }),
         });
-      } catch (e) {
-        console.error(e);
-      }
+      } catch (e) {}
     }, 300000);
 
     return () => clearInterval(heartbeat);
@@ -60,7 +118,7 @@ export default function Home() {
 
   const getWaitMessage = (estimateData) => {
     if (!estimateData) return ' • No estimate';
-    
+
     switch (estimateData.type) {
       case 'match_now':
         return ' • Match NOW!';
@@ -81,30 +139,27 @@ export default function Home() {
     }
   };
 
-  // Fetch queue status
   const fetchQueueStatus = async () => {
+    if (!isQueued) return;
+
     try {
       const res = await fetch(`${BASE}/queue/status`);
       if (res.ok) {
         const data = await res.json();
         setQueueStatus(data.estimates || {});
       }
-    } catch (e) {
-      // Silent fail - queue status is not critical
-    }
+    } catch (e) {}
   };
 
-  // Queue timeout management (20 minutes max)
   useEffect(() => {
     if (!isQueued || !queueStartTime) return;
 
     const updateRemainingTime = () => {
       const elapsed = Date.now() - queueStartTime;
-      const remaining = Math.max(0, 20 * 60 * 1000 - elapsed); // 20 minutes
+      const remaining = Math.max(0, 20 * 60 * 1000 - elapsed);
       setQueueTimeRemaining(remaining);
 
       if (remaining === 0) {
-        // Auto-remove from queue after 20 minutes
         cancelQueue();
         alert('You\'ve been in queue for 20 minutes and have been automatically removed. Please rejoin if you still want to play.');
       }
@@ -116,37 +171,30 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [isQueued, queueStartTime]);
 
-  // Update queue status every 60 seconds, or every 5 seconds if there are countdowns
   useEffect(() => {
-    fetchQueueStatus();
-    
-    const updateInterval = () => {
-      const hasCountdowns = Object.values(queueStatus).some(status => 
-        status?.estimate?.type === 'countdown'
-      );
-      return hasCountdowns ? 5000 : 60000; // 5s for countdowns, 60s otherwise
-    };
-    
-    const interval = setInterval(fetchQueueStatus, updateInterval());
-    
-    // Re-check interval when queueStatus changes
-    const intervalChecker = setInterval(() => {
-      clearInterval(interval);
-      const newInterval = setInterval(fetchQueueStatus, updateInterval());
-      return newInterval;
-    }, 10000); // Check every 10 seconds instead of 5
-    
-    return () => {
-      clearInterval(interval);
-      clearInterval(intervalChecker);
-    };
-  }, [queueStatus]);
+    if (!isQueued) return;
 
-  // Cancel queue function
+    fetchQueueStatus();
+
+    const updateInterval = () => {
+      const hasCountdowns = Object.values(queueStatus).some(status => status?.estimate?.type === 'countdown');
+      return hasCountdowns ? 30000 : 120000;
+    };
+
+    const interval = setInterval(fetchQueueStatus, updateInterval());
+
+    return () => clearInterval(interval);
+  }, [isQueued]);
+
   const cancelQueue = async () => {
     const playerId = localStorage.getItem('playerId');
     if (!playerId) return;
-    
+
+    if (matchCheckIntervalRef.current) {
+      clearInterval(matchCheckIntervalRef.current);
+      matchCheckIntervalRef.current = null;
+    }
+
     try {
       await fetch(`${BASE}/queue/leave`, {
         method: 'POST',
@@ -156,37 +204,40 @@ export default function Home() {
       setIsQueued(false);
       setQueueStartTime(null);
       setQueueTimeRemaining(null);
+
+      try {
+        const res = await fetch(`${BASE}/queue/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setQueueStatus(data.estimates || {});
+        }
+      } catch (e) {}
+
       alert('You left the queue');
     } catch (e) {
       alert('Failed to leave queue');
     }
   };
 
-  // Cleanup queues when user leaves page
   useEffect(() => {
     const playerId = localStorage.getItem('playerId');
-    
+
     const handleBeforeUnload = () => {
       if (playerId) {
-        // Use sendBeacon for reliable cleanup on page unload
-        navigator.sendBeacon(
-          `${BASE}/queue/leave`,
-          JSON.stringify({ playerId })
-        );
+        navigator.sendBeacon(`${BASE}/queue/leave`, JSON.stringify({ playerId }));
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
-    
+
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      // Also cleanup on component unmount
       if (playerId) {
         fetch(`${BASE}/queue/leave`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ playerId }),
-        }).catch(() => {}); // Silent fail
+        }).catch(() => {});
       }
     };
   }, []);
@@ -244,8 +295,13 @@ export default function Home() {
         alert(`You're in queue for ${time} minutes. Position: ${data.queuePosition || 1}. You'll be matched automatically!`);
         setLoading(false);
         
-        const checkInterval = setInterval(async () => {
-          try {
+        // Clear any existing match check interval
+        if (matchCheckIntervalRef.current) {
+          clearInterval(matchCheckIntervalRef.current);
+        }
+        
+        matchCheckIntervalRef.current = setInterval(async () => {
+                    try {
             const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -256,7 +312,7 @@ export default function Home() {
               const matchData = await matchRes.json();
               
               if (matchData.matched && matchData.roomId) {
-                clearInterval(checkInterval);
+                clearInterval(matchCheckIntervalRef.current);
                 localStorage.setItem('playerName', name.trim());
                 const displayId = matchData.roomId.replace(/^room-/, '');
                 router.push(`/room/${displayId}`);
@@ -264,35 +320,20 @@ export default function Home() {
               }
               
               if (!matchData.inQueue && !matchData.matched) {
-                clearInterval(checkInterval);
+                clearInterval(matchCheckIntervalRef.current);
                 setIsQueued(false);
                 setLoading(false);
                 return;
               }
             }
-            
-            const checkRes = await fetch(`${BASE}/rooms/join-next`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ playerId, name: playerName, mainTimeMs: parseInt(time) * 60 * 1000 }),
-            });
-            
-            if (checkRes.ok) {
-              const checkData = await checkRes.json();
-              if (checkData.room && checkData.room.roomId) {
-                clearInterval(checkInterval);
-                localStorage.setItem('playerName', name.trim());
-                const displayId = checkData.room.roomId.replace(/^room-/, '');
-                router.push(`/room/${displayId}`);
-              }
-            }
           } catch (e) {
-            console.log('⚠️ Poll error:', e);
-          }
-        }, 2000);
+                      }
+        }, 10000);
         
         setTimeout(() => {
-          clearInterval(checkInterval);
+          if (matchCheckIntervalRef.current) {
+            clearInterval(matchCheckIntervalRef.current);
+          }
         }, 120000);
       }
     } catch (e) {
@@ -342,8 +383,13 @@ export default function Home() {
         alert(`You're in queues for: ${data.joinedQueues.join(', ')} minutes. You'll be matched automatically!`);
         setLoading(false);
         
-        const checkInterval = setInterval(async () => {
-          try {
+        // Clear any existing match check interval
+        if (matchCheckIntervalRef.current) {
+          clearInterval(matchCheckIntervalRef.current);
+        }
+        
+        matchCheckIntervalRef.current = setInterval(async () => {
+                    try {
             const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -354,7 +400,7 @@ export default function Home() {
               const matchData = await matchRes.json();
               
               if (matchData.matched && matchData.roomId) {
-                clearInterval(checkInterval);
+                clearInterval(matchCheckIntervalRef.current);
                 localStorage.setItem('playerName', name.trim());
                 const displayId = matchData.roomId.replace(/^room-/, '');
                 router.push(`/room/${displayId}`);
@@ -362,19 +408,18 @@ export default function Home() {
               }
               
               if (!matchData.inQueue && !matchData.matched) {
-                clearInterval(checkInterval);
+                clearInterval(matchCheckIntervalRef.current);
                 setIsQueued(false);
                 setLoading(false);
                 return;
               }
             }
           } catch (e) {
-            console.error(e);
-          }
-        }, 2000);
+                      }
+        }, 10000);
         
         setTimeout(() => {
-          clearInterval(checkInterval);
+          clearInterval(matchCheckIntervalRef.current);
         }, 120000);
       } else {
         setLoading(false);
