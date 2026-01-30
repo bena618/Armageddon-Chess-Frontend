@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/router';
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
@@ -20,11 +20,19 @@ export default function RoomIndex() {
   const [error, setError] = useState(null);
   const [ws, setWs] = useState(null);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
+  const [toast, setToast] = useState(null);
+  const toastTimeoutRef = useRef(null);
 
   function getBackendRoomIdFromDisplay(displayId) {
     if (!displayId) return null;
     return displayId.startsWith('room-') ? displayId : 'room-' + displayId;
   }
+
+  const showToast = (message, type = 'info') => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ message, type });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -177,7 +185,7 @@ export default function RoomIndex() {
 
   function copyLink() {
     navigator.clipboard.writeText(window.location.href.replace(/\?.*/, ''));
-    alert('Link copied!');
+    showToast('Link copied!', 'success');
   }
 
   if (!id) return <div className="container">No room id in URL</div>;
@@ -186,6 +194,26 @@ export default function RoomIndex() {
 
   return (
     <main className="container">
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          color: 'white',
+          fontWeight: '500',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1000,
+          background: toast.type === 'success' ? '#28a745' : 
+                     toast.type === 'error' ? '#dc3545' : 
+                     toast.type === 'warning' ? '#ffc107' : '#17a2b8',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          {toast.message}
+        </div>
+      )}
+      
       <h2>Room {id}</h2>
 
       <div className="share">

@@ -446,6 +446,8 @@ export default function Room() {
   const [gameOverInfo, setGameOverInfo] = useState(null);
   const [message, setMessage] = useState(null);
   const [promotionPending, setPromotionPending] = useState(null);
+  const [toast, setToast] = useState(null);
+  const toastTimeoutRef = useRef(null);
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
   const shortPollRef = useRef(null);
@@ -456,6 +458,12 @@ export default function Room() {
   const [startPending, setStartPending] = useState(false);
 
   const boardFenProp = useMemo(() => boardFen === 'start' ? 'start' : boardFen, [boardFen]);
+
+  const showToast = (message, type = 'info') => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ message, type });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
+  };
 
   function getStoredPlayerId() {
     if (playerIdRef.current) return playerIdRef.current;
@@ -524,7 +532,7 @@ export default function Room() {
 
   function handleNameSubmit(playerName) {
     if (!playerName.trim()) {
-      alert('Please enter your name');
+      showToast('Please enter your name', 'warning');
       return;
     }
     
@@ -649,7 +657,7 @@ export default function Room() {
         const err = await res.json().catch(() => ({}));
         
         if (res.status === 400 && (err.error === 'room_full' || err.error === 'not_in_lobby')) {
-          alert('This room is already full or the game has started. You will be redirected to the lobby.');
+          showToast('This room is already full or the game has started. You will be redirected to the lobby.', 'error');
           setTimeout(() => {
             router.push('/');
           }, 2000);
@@ -829,7 +837,7 @@ export default function Room() {
       const isInRoom = savedPlayerId && room.players?.some(p => p.id === savedPlayerId);
       
       if (room.players?.length >= room.maxPlayers && !isInRoom) {
-        alert('This room is already full. You will be redirected to the lobby.');
+        showToast('This room is already full. You will be redirected to the lobby.', 'error');
         setTimeout(() => {
           router.push('/');
         }, 2000);
@@ -1332,6 +1340,26 @@ export default function Room() {
           rel="stylesheet"
         />
       </Head>
+
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          color: 'white',
+          fontWeight: '500',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1000,
+          background: toast.type === 'success' ? '#28a745' : 
+                     toast.type === 'error' ? '#dc3545' : 
+                     toast.type === 'warning' ? '#ffc107' : '#17a2b8',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          {toast.message}
+        </div>
+      )}
       <main className="container" style={{ backgroundColor: 'transparent' }}>
       <h2>Room {roomIdRef.current || roomId || '...'}</h2>
 
