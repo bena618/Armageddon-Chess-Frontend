@@ -1086,14 +1086,17 @@ export default function Room() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setMessage('Bid failed: ' + (err.error || 'Unknown error'));
+        setError('Bid failed: ' + (err.error || 'Unknown error'));
+        setTimeout(() => setError(null), 5000); // Auto-clear error after 5 seconds
         return;
       }
 
       setMessage('Bid submitted!');
+      setTimeout(() => setMessage(null), 3000); // Auto-clear success after 3 seconds
       await fetchState();
     } catch (e) {
       setMessage('Network error submitting bid');
+      setTimeout(() => setMessage(null), 5000); // Auto-clear after 5 seconds
     }
   }
 
@@ -1339,7 +1342,14 @@ export default function Room() {
         </div>
       )}
 
-      {message && <div style={{ color: 'green', marginTop: 8 }}>{message}</div>}
+      {message && (
+        <div style={{ 
+          color: message.includes('failed') || message.includes('error') ? 'red' : 'green', 
+          marginTop: 8 
+        }}>
+          {message}
+        </div>
+      )}
       {error && <div style={{ color: 'red', marginTop: 8 }}>{error}</div>}
 
       {state && state.phase === 'PLAYING' && (

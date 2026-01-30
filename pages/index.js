@@ -20,9 +20,18 @@ export default function Home() {
   const [isQueued, setIsQueued] = useState(false);
   const [queueStartTime, setQueueStartTime] = useState(null);
   const [queueTimeRemaining, setQueueTimeRemaining] = useState(null);
+  const [toast, setToast] = useState(null);
   const autoJoinTimerRef = useRef(null);
   const autoJoinIntervalRef = useRef(null);
   const matchCheckIntervalRef = useRef(null);
+  const toastTimeoutRef = useRef(null);
+  const wsRef = useRef(null);
+
+  const showToast = (message, type = 'info') => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ message, type });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
+  };
 
   function getOrCreatePlayerId() {
     if (typeof window === 'undefined') return crypto.randomUUID();
@@ -140,8 +149,6 @@ export default function Home() {
   };
 
   const fetchQueueStatus = async () => {
-    if (!isQueued) return;
-
     try {
       const res = await fetch(`${BASE}/queue/status`);
       if (res.ok) {
@@ -161,7 +168,7 @@ export default function Home() {
 
       if (remaining === 0) {
         cancelQueue();
-        alert('You\'ve been in queue for 20 minutes and have been automatically removed. Please rejoin if you still want to play.');
+        showToast('You\'ve been in queue for 20 minutes and have been automatically removed. Please rejoin if you still want to play.', 'warning');
       }
     };
 
@@ -170,6 +177,16 @@ export default function Home() {
 
     return () => clearInterval(interval);
   }, [isQueued, queueStartTime]);
+
+  useEffect(() => {
+    // Only poll when on public game screen
+    if (gameType !== 'public') return;
+
+    fetchQueueStatus();
+    const interval = setInterval(fetchQueueStatus, 60000); // Every minute for everyone
+
+    return () => clearInterval(interval);
+  }, [gameType]);
 
   useEffect(() => {
     if (!isQueued) return;
@@ -213,9 +230,9 @@ export default function Home() {
         }
       } catch (e) {}
 
-      alert('You left the queue');
+      showToast('You left the queue', 'success');
     } catch (e) {
-      alert('Failed to leave queue');
+      showToast('Failed to leave queue', 'error');
     }
   };
 
@@ -244,7 +261,7 @@ export default function Home() {
 
   async function joinPublicQueue(time) {
     if (!name.trim()) {
-      alert('Please enter your name');
+      showToast('Please enter your name', 'warning');
       return;
     }
     setLoading(true);
@@ -261,7 +278,7 @@ export default function Home() {
       
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
-        alert('Failed to join queue: ' + (err.error || res.status));
+        showToast('Failed to join queue: ' + (err.error || res.status), 'error');
         setLoading(false);
         return;
       }
@@ -292,7 +309,7 @@ export default function Home() {
       if (data.queued) {
         setIsQueued(true);
         setQueueStartTime(Date.now());
-        alert(`You're in queue for ${time} minutes. Position: ${data.queuePosition || 1}. You'll be matched automatically!`);
+        showToast(`You're in queue for ${time} minutes. Position: ${data.queuePosition || 1}. You'll be matched automatically!`, 'success');
         setLoading(false);
         
         // Clear any existing match check interval
@@ -337,14 +354,14 @@ export default function Home() {
         }, 120000);
       }
     } catch (e) {
-      alert('Network error joining queue');
+      showToast('Network error joining queue', 'error');
       setLoading(false);
     }
   }
 
   async function joinAllPublicQueues() {
     if (!name.trim()) {
-      alert('Please enter your name');
+      showToast('Please enter your name', 'warning');
       return;
     }
     setLoading(true);
@@ -361,7 +378,7 @@ export default function Home() {
       
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
-        alert('Failed to join queues: ' + (err.error || res.status));
+        showToast('Failed to join queues: ' + (err.error || res.status), 'error');
         setLoading(false);
         return;
       }
@@ -380,7 +397,7 @@ export default function Home() {
       if (data.queued) {
         setIsQueued(true);
         setQueueStartTime(Date.now());
-        alert(`You're in queues for: ${data.joinedQueues.join(', ')} minutes. You'll be matched automatically!`);
+        showToast(`You're in queues for: ${data.joinedQueues.join(', ')} minutes. You'll be matched automatically!`, 'success');
         setLoading(false);
         
         // Clear any existing match check interval
@@ -423,17 +440,17 @@ export default function Home() {
         }, 120000);
       } else {
         setLoading(false);
-        alert('No available queues found. You can create a private room instead!');
+        showToast('No available queues found. You can create a private room instead!', 'info');
       }
     } catch (e) {
-      alert('Network error joining queues');
+      showToast('Network error joining queues', 'error');
       setLoading(false);
     }
   }
 
   async function createPrivateRoom(time) {
     if (!name.trim()) {
-      alert('Please enter your name');
+      showToast('Please enter your name', 'warning');
       return;
     }
     setLoading(true);
@@ -450,14 +467,14 @@ export default function Home() {
       
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
-        alert('Failed to create room: ' + (err.error || res.status));
+        showToast('Failed to create room: ' + (err.error || res.status), 'error');
         return;
       }
       
       const data = await res.json();
       const roomId = data.roomId || data.meta?.roomId;
       if (!roomId) {
-        alert('No room ID returned');
+        showToast('No room ID returned', 'error');
         return;
       }
       
@@ -465,7 +482,7 @@ export default function Home() {
       const displayId = roomId.replace(/^room-/, '');
       router.push(`/room/${displayId}?private=true`);
     } catch (e) {
-      alert('Network error creating room');
+      showToast('Network error creating room', 'error');
     } finally {
       setLoading(false);
     }
@@ -473,7 +490,7 @@ export default function Home() {
 
   async function playPublic() {
     if (!name.trim()) {
-      alert('Please enter your name');
+      showToast('Please enter your name', 'warning');
       return;
     }
     setLoading(true);
@@ -497,13 +514,13 @@ export default function Home() {
           });
           if (!createRes.ok) {
             const err = await createRes.json().catch(() => ({ error: 'unknown' }));
-            alert('Failed to create room: ' + (err.error || createRes.status));
+            showToast('Failed to create room: ' + (err.error || createRes.status));
             return;
           }
           const data = await createRes.json();
           const roomId = data.roomId || data.meta?.roomId;
           if (!roomId) {
-            alert('No room ID returned');
+            showToast('No room ID returned');
             return;
           }
           const displayId = roomId.replace(/^room-/, '');
@@ -511,7 +528,7 @@ export default function Home() {
           return;
         }
         const err = await res.json().catch(() => ({}));
-        alert('Quick match error: ' + (err.error || res.status));
+        showToast('Quick match error: ' + (err.error || res.status));
         return;
       }
 
@@ -526,20 +543,20 @@ export default function Home() {
           });
           if (!createRes.ok) {
             const err = await createRes.json().catch(() => ({ error: 'unknown' }));
-            alert('Failed to create room: ' + (err.error || createRes.status));
+            showToast('Failed to create room: ' + (err.error || createRes.status));
             return;
           }
           const createData = await createRes.json();
           const roomId = createData.roomId || createData.meta?.roomId;
           if (!roomId) {
-            alert('No room ID returned');
+            showToast('No room ID returned');
             return;
           }
           const displayId = roomId.replace(/^room-/, '');
           router.push(`/room/${displayId}`);
           return;
         }
-        alert('Quick match error: ' + data.error);
+        showToast('Quick match error: ' + data.error);
         return;
       }
       
@@ -554,25 +571,25 @@ export default function Home() {
           });
           if (!createRes.ok) {
             const err = await createRes.json().catch(() => ({ error: 'unknown' }));
-            alert('Failed to create room: ' + (err.error || createRes.status));
+            showToast('Failed to create room: ' + (err.error || createRes.status));
             return;
           }
           const createData = await createRes.json();
           const roomId = createData.roomId || createData.meta?.roomId;
           if (!roomId) {
-            alert('No room ID returned');
+            showToast('No room ID returned');
             return;
           }
           const displayId = roomId.replace(/^room-/, '');
           router.push(`/room/${displayId}`);
           return;
         }
-        alert('Quick match error: ' + room.error);
+        showToast('Quick match error: ' + room.error);
         return;
       }
       
       if (!room?.roomId) {
-        alert('No room returned');
+        showToast('No room returned');
         return;
       }
       localStorage.setItem('playerName', name.trim());
@@ -587,7 +604,7 @@ export default function Home() {
 
   async function playPrivate() {
     if (!name.trim()) {
-      alert('Please enter your name');
+      showToast('Please enter your name');
       return;
     }
     setLoading(true);
@@ -599,13 +616,13 @@ export default function Home() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'unknown' }));
-        alert('Failed to create room: ' + (err.error || res.status));
+        showToast('Failed to create room: ' + (err.error || res.status));
         return;
       }
       const data = await res.json();
       const roomId = data.roomId || data.meta?.roomId;
       if (!roomId) {
-        alert('No room ID returned');
+        showToast('No room ID returned');
         return;
       }
       const playerId = getOrCreatePlayerId();
@@ -629,6 +646,26 @@ export default function Home() {
   return (
     <main className="container">
       <h1>Armageddon Chess</h1>
+
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          color: 'white',
+          fontWeight: '500',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1000,
+          background: toast.type === 'success' ? '#28a745' : 
+                     toast.type === 'error' ? '#dc3545' : 
+                     toast.type === 'warning' ? '#ffc107' : '#17a2b8',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          {toast.message}
+        </div>
+      )}
 
       {autoJoinPending && (
         <div style={{ padding: 12, background: '#fff3cd', border: '1px solid #ffeeba', marginBottom: 12 }}>
