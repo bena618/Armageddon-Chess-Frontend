@@ -448,6 +448,8 @@ export default function Room() {
   const [promotionPending, setPromotionPending] = useState(null);
   const [toast, setToast] = useState(null);
   const toastTimeoutRef = useRef(null);
+  const [showResignConfirm, setShowResignConfirm] = useState(false);
+  const [showWinnerModal, setShowWinnerModal] = useState(false);
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
   const shortPollRef = useRef(null);
@@ -947,21 +949,8 @@ export default function Room() {
         setMessage('Rematch started!');
         await fetchState();
       } else if (data.voteResult === 'no_vote') {
-        // Check if this player voted yes - if so, redirect to queue
-        const playerVote = data.votes?.[playerIdRef.current];
-        if (playerVote === true) {
-          // Yes voter goes to queue
-          setMessage('Opponent declined rematch - you\'re back in queue');
-          setTimeout(() => {
-            router.replace('/');
-          }, 2000);
-        } else {
-          // No voter goes to lobby
-          setMessage('You voted No - returning to lobby');
-          setTimeout(() => {
-            router.replace('/');
-          }, 2000);
-        }
+        setError('Rematch vote failed - not enough votes');
+        await fetchState();
       } else if (data.voteResult === 'waiting_for_opponent') {
         setMessage('You voted Yes - waiting for opponent or will join quick match if they decline');
         await fetchState();
@@ -971,6 +960,60 @@ export default function Room() {
       }
     } catch (e) { 
       setError('Network error'); 
+    }
+  }
+
+  async function resign() {
+    const backendId = getBackendRoomId();
+    if (!backendId) return;
+    
+    setShowResignConfirm(true);
+  }
+
+  async function confirmResign() {
+    const backendId = getBackendRoomId();
+    if (!backendId) return;
+    
+    setShowResignConfirm(false);
+    
+    try {
+      // Try the new resign endpoint first
+      let res = await fetch(`${BASE}/rooms/${backendId}/resign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: playerIdRef.current }),
+      });
+      
+      // If resign endpoint doesn't exist yet, fallback to time-forfeit with opponent as timed out player
+      if (!res.ok || res.status === 404) {
+        const myColor = state?.colors?.[playerIdRef.current];
+        const opponentPlayer = state?.players?.find(p => p.id !== playerIdRef.current);
+        
+        if (opponentPlayer) {
+          showToast('Resign endpoint not available, using fallback method...', 'warning');
+          
+          // Use time-forfeit endpoint but with the current player as "timed out"
+          res = await fetch(`${BASE}/rooms/${backendId}/time-forfeit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timedOutPlayerId: playerIdRef.current }),
+          });
+        }
+      }
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'unknown' }));
+        setError('Failed to resign: ' + (err.error || res.status));
+        return;
+      }
+      
+      showToast('You have resigned from the game', 'warning');
+      await fetchState();
+      
+      // Show winner modal after a short delay
+      setTimeout(() => setShowWinnerModal(true), 500);
+    } catch (e) {
+      setError('Network error resigning from game');
     }
   }
 
@@ -1360,6 +1403,135 @@ export default function Room() {
           {toast.message}
         </div>
       )}
+
+      {showResignConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1001
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '24px',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            maxWidth: '400px',
+            width: '90%',
+            textAlign: 'center'
+          }}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#333' }}>Confirm Resignation</h3>
+            <p style={{ margin: '0 0 24px 0', color: '#666', lineHeight: '1.5' }}>
+              Are you sure you want to resign? This action cannot be undone and you will lose the game.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button
+                onClick={() => setShowResignConfirm(false)}
+                style={{
+                  padding: '10px 20px',
+                  background: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmResign}
+                style={{
+                  padding: '10px 20px',
+                  background: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer'
+                }}
+              >
+                Resign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWinnerModal && state?.phase === 'FINISHED' && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1002
+        }}>
+          <div style={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            padding: '40px',
+            borderRadius: '20px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.4)',
+            maxWidth: '500px',
+            width: '90%',
+            textAlign: 'center',
+            color: 'white'
+          }}>
+            <div style={{ fontSize: '60px', marginBottom: '20px' }}>🏆</div>
+            <h2 style={{ margin: '0 0 16px 0', fontSize: '32px', fontWeight: 'bold' }}>
+              {state?.result === 'resignation' ? 'Victory by Resignation!' : 
+               state?.result === 'checkmate' ? 'Checkmate!' :
+               state?.result === 'time_forfeit' ? 'Victory on Time!' :
+               'Game Over!'}
+            </h2>
+            <p style={{ margin: '0 0 24px 0', fontSize: '20px', opacity: 0.9 }}>
+              {state?.winnerId ? (
+                <>
+                  {state?.players?.find(p => p.id === state.winnerId)?.name || 'Unknown Player'} wins!
+                </>
+              ) : (
+                state?.result === 'draw' ? 'It\'s a draw!' : 'Game finished'
+              )}
+            </p>
+            <button
+              onClick={() => setShowWinnerModal(false)}
+              style={{
+                padding: '12px 30px',
+                background: 'rgba(255, 255, 255, 0.2)',
+                color: 'white',
+                border: '2px solid rgba(255, 255, 255, 0.3)',
+                borderRadius: '8px',
+                fontSize: '16px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseOver={(e) => {
+                e.target.style.background = 'rgba(255, 255, 255, 0.3)';
+                e.target.style.transform = 'translateY(-2px)';
+              }}
+              onMouseOut={(e) => {
+                e.target.style.background = 'rgba(255, 255, 255, 0.2)';
+                e.target.style.transform = 'translateY(0)';
+              }}
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
       <main className="container" style={{ backgroundColor: 'transparent' }}>
       <h2>Room {roomIdRef.current || roomId || '...'}</h2>
 
@@ -1579,6 +1751,40 @@ export default function Room() {
                   Black: {liveBlackMs !== null ? Math.ceil(liveBlackMs/1000) + 's' : (state.clocks ? Math.max(0, Math.floor((state.clocks.blackRemainingMs || 0) / 1000)) + 's' : '—')}
                 </div>
               </div>
+
+              {state?.phase === 'PLAYING' && state?.players?.some(p => p.id === playerIdRef.current) && (
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'center', 
+                  marginTop: 16 
+                }}>
+                  <button
+                    onClick={resign}
+                    style={{
+                      padding: '10px 20px',
+                      background: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 4px rgba(220, 53, 69, 0.3)',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseOver={(e) => {
+                      e.target.style.background = '#c82333';
+                      e.target.style.transform = 'translateY(-1px)';
+                    }}
+                    onMouseOut={(e) => {
+                      e.target.style.background = '#dc3545';
+                      e.target.style.transform = 'translateY(0)';
+                    }}
+                  >
+                    🏳️ Resign Game
+                  </button>
+                </div>
+              )}
 
               {state?.phase === 'FINISHED' && (
                 <div style={{ marginTop: 24, padding: 16, border: '1px solid #ddd', background: '#f7fff7', borderRadius: 8 }}>
