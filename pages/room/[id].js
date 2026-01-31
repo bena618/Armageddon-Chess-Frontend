@@ -862,33 +862,6 @@ export default function Room() {
         return;
       }
 
-      updateLocalGameAndClocks(room);
-      setState(room);
-
-      if (room.phase === 'FINISHED') {
-        if (room.result === 'draw') {
-          setGameOverInfo({ winnerId: null, winnerName: null, color: null });
-          setMessage(`Draw${room.reason ? ` (${room.reason})` : ''}`);
-        } else if (room.winnerId) {
-          const winner = room.players.find(p => p.id === room.winnerId);
-          const color = room.colors ? room.colors[room.winnerId] : null;
-          setGameOverInfo({
-            winnerId: room.winnerId,
-            winnerName: winner ? winner.name : null,
-            color
-          });
-          if (room.result === 'time_forfeit') {
-            setMessage('Win on time');
-          } else if (room.result === 'checkmate') {
-            setMessage('Checkmate');
-          } else {
-            setMessage('Game over');
-          }
-        } else {
-          setMessage('Game over');
-        }
-      }
-
       try {
         const savedPid = getStoredPlayerId();
         const listed =
@@ -908,6 +881,7 @@ export default function Room() {
         setError('Background rejoin attempt failed');
       }
     } catch (e) {
+      setError('Failed to fetch room state');
     }
   }
 
@@ -921,45 +895,10 @@ export default function Room() {
         body: JSON.stringify({ timedOutPlayerId }),
       });
       if (!res.ok) return;
+      
       await fetchState();
     } catch (e) {
-    }
-  }
-
-  async function sendRematchVote(agree) {
-    const backendId = getBackendRoomId();
-    if (!backendId) return;
-    try {
-      const res = await fetch(`${BASE}/rooms/${backendId}/rematch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId: playerIdRef.current, agree }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        if (data.error === 'already_voted') {
-          setError('You have already voted - votes cannot be changed');
-          return;
-        }
-        setError('Failed to send rematch vote');
-        return;
-      }
-      
-      if (data.rematchStarted) {
-        setMessage('Rematch started!');
-        await fetchState();
-      } else if (data.voteResult === 'no_vote') {
-        setError('Rematch vote failed - not enough votes');
-        await fetchState();
-      } else if (data.voteResult === 'waiting_for_opponent') {
-        setMessage('You voted Yes - waiting for opponent or will join quick match if they decline');
-        await fetchState();
-      } else {
-        setMessage('Vote recorded');
-        await fetchState();
-      }
-    } catch (e) { 
-      setError('Network error'); 
+      console.error('🔍 sendTimeForfeit error:', e);
     }
   }
 
@@ -968,6 +907,40 @@ export default function Room() {
     if (!backendId) return;
     
     setShowResignConfirm(true);
+  }
+
+  async function sendRematchVote(vote) {
+    const backendId = getBackendRoomId();
+    if (!backendId) return;
+
+    try {
+      const res = await fetch(`${BASE}/rooms/${backendId}/rematch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: playerIdRef.current, agree: vote }),
+      });
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setError('Failed to submit rematch vote');
+        setTimeout(() => setError(null), 5000);
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      
+      if (data.rematchStarted) {
+        showToast('Rematch started!', 'success');
+        setStartPending(false);
+      } else {
+        showToast(vote ? 'You voted Yes - waiting for opponent' : 'You voted No', 'info');
+      }
+      
+      await fetchState();
+    } catch (e) {
+      setError('Network error submitting rematch vote');
+      setTimeout(() => setError(null), 5000);
+    }
   }
 
   async function confirmResign() {
@@ -1008,10 +981,11 @@ export default function Room() {
       }
       
       showToast('You have resigned from the game', 'warning');
-      await fetchState();
       
-      // Show winner modal after a short delay
-      setTimeout(() => setShowWinnerModal(true), 500);
+      // Reset startPending immediately after resignation
+      setStartPending(false);
+      
+      await fetchState();
     } catch (e) {
       setError('Network error resigning from game');
     }
@@ -1021,6 +995,13 @@ export default function Room() {
     if (!roomId || !joined) return;
 
     const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+    const isOfflineMode = state?.players?.some(p => p.id?.startsWith('test-player-'));
+    
+    // Skip backend calls in offline mode
+    if (isOfflineMode) {
+      console.log('🎮 Offline mode detected - skipping backend calls');
+      return;
+    }
     
     if (isLocalDev || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
             fetchState();
@@ -1033,6 +1014,14 @@ export default function Room() {
   useEffect(() => {
     const t = setInterval(() => {
       if (!state || !state.clocks || gameOverInfo) return;
+      console.log('🔍 Clock update check:', { 
+        phase: state.phase, 
+        clocks: state.clocks, 
+        gameOverInfo,
+        liveWhiteMs, 
+        liveBlackMs 
+      });
+      
       const now = Date.now();
       const last = state.clocks.lastTickAt || now;
       const elapsed = Math.max(0, now - last);
@@ -1088,19 +1077,35 @@ export default function Room() {
   }
 
   async function startBidding() {
-    if (startPending) return;
+    console.log('🔍 startBidding called:', { 
+      startPending, 
+      playersCount: state?.players?.length, 
+      maxPlayers: state?.maxPlayers,
+      phase: state?.phase,
+      startRequestedBy: state?.startRequestedBy,
+      playerId: playerIdRef.current
+    });
+    
+    if (startPending) {
+      console.log('🔍 startBidding blocked: startPending is true');
+      return;
+    }
 
     const backendId = getBackendRoomId();
     setStartPending(true);
     setMessage('Requesting start... waiting for opponent');
 
     try {
+      console.log('🔍 Sending start-bidding request to:', `${BASE}/rooms/${backendId}/start-bidding`);
       const res = await fetch(`${BASE}/rooms/${backendId}/start-bidding`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId: playerIdRef.current }),
       });
+      console.log('🔍 start-bidding response:', { status: res.status, ok: res.ok });
+      
       const data = await res.json().catch(() => ({}));
+      console.log('🔍 start-bidding response data:', data);
 
       if (!res.ok) {
         setMessage('Failed to request start');
@@ -1108,7 +1113,17 @@ export default function Room() {
         return;
       }
 
+      // Success - add timeout fallback to reset startPending
+      console.log('🔍 start-bidding successful, waiting for opponent');
+      setTimeout(() => {
+        if (startPending) {
+          console.log('🔍 Timeout fallback: resetting startPending');
+          setStartPending(false);
+        }
+      }, 10000); // Reset after 10 seconds if no state change
+      
     } catch (e) {
+      console.error('🔍 start-bidding error:', e);
       setMessage('Network error');
       setStartPending(false);
     }
@@ -1117,12 +1132,15 @@ export default function Room() {
   async function submitBid() {
     const minutes = parseInt(bidMinutes, 10);
     const seconds = parseInt(bidSeconds, 10);
+    console.log('🔍 submitBid called:', { minutes, seconds, bidMinutes, bidSeconds });
+    
     if (isNaN(minutes) || isNaN(seconds) || (minutes === 0 && seconds === 0)) {
       setMessage('Invalid bid time');
       return;
     }
 
     const amountMs = (minutes * 60 + seconds) * 1000;
+    console.log('🔍 Calculated bid amountMs:', amountMs);
 
     const backendId = getBackendRoomId();
     try {
@@ -1134,9 +1152,11 @@ export default function Room() {
           amount: amountMs,
         }),
       });
+      console.log('🔍 submit-bid response:', { status: res.status, ok: res.ok });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        console.error('🔍 submit-bid error details:', err);
         setError('Bid failed: ' + (err.error || 'Unknown error'));
         setTimeout(() => setError(null), 5000); // Auto-clear error after 5 seconds
         return;
@@ -1144,8 +1164,9 @@ export default function Room() {
 
       setMessage('Bid submitted!');
       setTimeout(() => setMessage(null), 3000); // Auto-clear success after 3 seconds
-      await fetchState();
+      await fetchState(); // Fetch updated state after bid submission
     } catch (e) {
+      console.error('🔍 submit-bid network error:', e);
       setMessage('Network error submitting bid');
       setTimeout(() => setMessage(null), 5000); // Auto-clear after 5 seconds
     }
@@ -1473,66 +1494,215 @@ export default function Room() {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          background: 'radial-gradient(circle at center, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.9) 100%)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1002
+          zIndex: 1002,
+          animation: 'fadeIn 0.5s ease-out'
         }}>
+          {/* Animated Background Elements */}
           <div style={{
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            padding: '40px',
-            borderRadius: '20px',
-            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.4)',
-            maxWidth: '500px',
+            position: 'absolute',
+            top: '10%',
+            left: '10%',
+            fontSize: '40px',
+            animation: 'float 3s ease-in-out infinite',
+            opacity: 0.6
+          }}>✨</div>
+          <div style={{
+            position: 'absolute',
+            top: '20%',
+            right: '15%',
+            fontSize: '30px',
+            animation: 'float 4s ease-in-out infinite reverse',
+            opacity: 0.6
+          }}>🌟</div>
+          <div style={{
+            position: 'absolute',
+            bottom: '15%',
+            left: '20%',
+            fontSize: '35px',
+            animation: 'float 3.5s ease-in-out infinite',
+            opacity: 0.6
+          }}>💫</div>
+          <div style={{
+            position: 'absolute',
+            bottom: '25%',
+            right: '10%',
+            fontSize: '25px',
+            animation: 'float 4.5s ease-in-out infinite reverse',
+            opacity: 0.6
+          }}>⭐</div>
+
+          <div style={{
+            background: 'linear-gradient(135deg, #FFD700 0%, #FFA500 50%, #FF6B6B 100%)',
+            padding: '50px',
+            borderRadius: '25px',
+            boxShadow: '0 25px 80px rgba(0, 0, 0, 0.6), 0 0 60px rgba(255, 215, 0, 0.4)',
+            maxWidth: '600px',
             width: '90%',
             textAlign: 'center',
-            color: 'white'
+            color: 'white',
+            position: 'relative',
+            animation: 'slideInScale 0.6s ease-out',
+            border: '3px solid rgba(255, 255, 255, 0.3)'
           }}>
-            <div style={{ fontSize: '60px', marginBottom: '20px' }}>🏆</div>
-            <h2 style={{ margin: '0 0 16px 0', fontSize: '32px', fontWeight: 'bold' }}>
+            {/* Trophy with animation */}
+            <div style={{
+              fontSize: '80px',
+              marginBottom: '25px',
+              animation: 'bounce 1s ease-in-out infinite',
+              textShadow: '0 0 30px rgba(255, 215, 0, 0.8)'
+            }}>🏆</div>
+            
+            {/* Victory Title */}
+            <h2 style={{
+              margin: '0 0 20px 0',
+              fontSize: '42px',
+              fontWeight: 'bold',
+              textShadow: '2px 2px 4px rgba(0, 0, 0, 0.5)',
+              animation: 'glow 2s ease-in-out infinite alternate'
+            }}>
               {state?.result === 'resignation' ? 'Victory by Resignation!' : 
                state?.result === 'checkmate' ? 'Checkmate!' :
                state?.result === 'time_forfeit' ? 'Victory on Time!' :
+               state?.result === 'draw' ? 'Draw!' :
                'Game Over!'}
             </h2>
-            <p style={{ margin: '0 0 24px 0', fontSize: '20px', opacity: 0.9 }}>
+            
+            {/* Winner Information */}
+            <p style={{
+              margin: '0 0 30px 0',
+              fontSize: '24px',
+              opacity: 0.95,
+              fontWeight: '500',
+              lineHeight: '1.4'
+            }}>
               {state?.winnerId ? (
                 <>
-                  {state?.players?.find(p => p.id === state.winnerId)?.name || 'Unknown Player'} wins!
+                  <div style={{
+                    fontSize: '28px',
+                    fontWeight: 'bold',
+                    marginBottom: '10px',
+                    color: '#FFD700'
+                  }}>
+                    🎉 {state?.players?.find(p => p.id === state.winnerId)?.name || 'Unknown Player'} 🎉
+                  </div>
+                  <div style={{ fontSize: '18px', opacity: 0.9 }}>
+                    {state?.colors?.[state.winnerId] === 'white' ? '⚪ White' : '⚫ Black'} Wins!
+                  </div>
                 </>
               ) : (
-                state?.result === 'draw' ? 'It\'s a draw!' : 'Game finished'
+                <div style={{ fontSize: '26px', opacity: 0.9 }}>
+                  {state?.result === 'draw' ? '🤝 It\'s a draw!' : '🏁 Game finished'}
+                </div>
               )}
             </p>
-            <button
-              onClick={() => setShowWinnerModal(false)}
-              style={{
-                padding: '12px 30px',
-                background: 'rgba(255, 255, 255, 0.2)',
-                color: 'white',
-                border: '2px solid rgba(255, 255, 255, 0.3)',
-                borderRadius: '8px',
-                fontSize: '16px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.3s ease'
-              }}
-              onMouseOver={(e) => {
-                e.target.style.background = 'rgba(255, 255, 255, 0.3)';
-                e.target.style.transform = 'translateY(-2px)';
-              }}
-              onMouseOut={(e) => {
-                e.target.style.background = 'rgba(255, 255, 255, 0.2)';
-                e.target.style.transform = 'translateY(0)';
-              }}
-            >
-              Continue
-            </button>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => {
+                  console.log('🔍 Winner modal closed');
+                  setShowWinnerModal(false);
+                }}
+                style={{
+                  padding: '15px 35px',
+                  background: 'rgba(255, 255, 255, 0.25)',
+                  color: 'white',
+                  border: '2px solid rgba(255, 255, 255, 0.4)',
+                  borderRadius: '12px',
+                  fontSize: '18px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backdropFilter: 'blur(10px)'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.background = 'rgba(255, 255, 255, 0.35)';
+                  e.target.style.transform = 'translateY(-3px) scale(1.05)';
+                  e.target.style.boxShadow = '0 8px 25px rgba(0, 0, 0, 0.3)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.background = 'rgba(255, 255, 255, 0.25)';
+                  e.target.style.transform = 'translateY(0) scale(1)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              >
+                Continue
+              </button>
+              
+              {/* Share Victory Button */}
+              <button
+                onClick={() => {
+                  const winnerName = state?.players?.find(p => p.id === state.winnerId)?.name || 'Someone';
+                  const resultText = state?.result === 'draw' ? 'drew' : 'won';
+                  const shareText = `I just ${resultText} a game of Armageddon Chess! ${state?.result === 'draw' ? '' : `🏆 ${winnerName} was victorious!`}`;
+                  navigator.clipboard.writeText(shareText);
+                  // You could add a toast notification here
+                }}
+                style={{
+                  padding: '15px 35px',
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  color: 'white',
+                  border: '2px solid rgba(255, 255, 255, 0.3)',
+                  borderRadius: '12px',
+                  fontSize: '18px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  backdropFilter: 'blur(10px)'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.background = 'rgba(255, 255, 255, 0.25)';
+                  e.target.style.transform = 'translateY(-3px) scale(1.05)';
+                  e.target.style.boxShadow = '0 8px 25px rgba(0, 0, 0, 0.3)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.background = 'rgba(255, 255, 255, 0.15)';
+                  e.target.style.transform = 'translateY(0) scale(1)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              >
+                📤 Share Victory
+              </button>
+            </div>
           </div>
+
+          {/* CSS Animations */}
+          <style jsx>{`
+            @keyframes fadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes slideInScale {
+              from { 
+                opacity: 0;
+                transform: scale(0.8) translateY(50px);
+              }
+              to { 
+                opacity: 1;
+                transform: scale(1) translateY(0);
+              }
+            }
+            @keyframes bounce {
+              0%, 100% { transform: translateY(0); }
+              50% { transform: translateY(-20px); }
+            }
+            @keyframes float {
+              0%, 100% { transform: translateY(0) rotate(0deg); }
+              50% { transform: translateY(-15px) rotate(10deg); }
+            }
+            @keyframes glow {
+              from { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 215, 0, 0.6); }
+              to { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 30px rgba(255, 215, 0, 0.9); }
+            }
+          `}</style>
         </div>
       )}
       <main className="container" style={{ backgroundColor: 'transparent' }}>
+      
       <h2>Room {roomIdRef.current || roomId || '...'}</h2>
 
       {(state?.private || (typeof window !== 'undefined' && window.location.search.includes('private=true'))) && (
