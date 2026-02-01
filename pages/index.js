@@ -73,7 +73,6 @@ export default function Home() {
 
             matchCheckIntervalRef.current = setInterval(async () => {
               try {
-                // Only poll if WebSocket is not connected
                 if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
                   const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
                     method: 'POST',
@@ -97,7 +96,6 @@ export default function Home() {
                       return;
                     }
 
-                    // If queue shows "match soon", increase polling frequency
                     if (matchData.estimate?.type === 'countdown' && matchData.estimate.durationMs < 10000) {
                       clearInterval(matchCheckIntervalRef.current);
                       matchCheckIntervalRef.current = setInterval(arguments.callee, 1000);
@@ -122,7 +120,6 @@ export default function Home() {
     const playerId = localStorage.getItem('playerId');
     if (!playerId || !isQueued) return;
 
-    // Use existing room WebSocket system for matchmaking notifications
     const setupMatchWebSocket = () => {
       if (wsRef.current) {
         wsRef.current.close();
@@ -231,11 +228,10 @@ export default function Home() {
   }, [isQueued, queueStartTime]);
 
   useEffect(() => {
-    // Only poll when on public game screen
     if (gameType !== 'public') return;
 
     fetchQueueStatus();
-    const interval = setInterval(fetchQueueStatus, 60000); // Every minute for everyone
+    const interval = setInterval(fetchQueueStatus, 60000);
 
     return () => clearInterval(interval);
   }, [gameType]);
@@ -364,7 +360,6 @@ export default function Home() {
         showToast(`You're in queue for ${time} minutes. Position: ${data.queuePosition || 1}. You'll be matched automatically!`, 'success');
         setLoading(false);
         
-        // Clear any existing match check interval
         if (matchCheckIntervalRef.current) {
           clearInterval(matchCheckIntervalRef.current);
         }
@@ -452,7 +447,6 @@ export default function Home() {
         showToast(`You're in queues for: ${data.joinedQueues.join(', ')} minutes. You'll be matched automatically!`, 'success');
         setLoading(false);
         
-        // Clear any existing match check interval
         if (matchCheckIntervalRef.current) {
           clearInterval(matchCheckIntervalRef.current);
         }
@@ -556,7 +550,6 @@ export default function Home() {
       });
       if (!res.ok) {
         if (res.status === 404) {
-          // Save player name BEFORE creating room
           localStorage.setItem('playerName', playerName);
           
           const createRes = await fetch(`${BASE}/rooms`, {
@@ -648,7 +641,6 @@ export default function Home() {
       const displayId = room.roomId.replace(/^room-/, '');
       router.push(`/room/${displayId}`);
     } catch (e) {
-      console.error(e);
     } finally {
       setLoading(false);
     }
@@ -682,7 +674,6 @@ export default function Home() {
       const displayId = roomId.replace(/^room-/, '');
       router.push(`/room/${displayId}?private=true`);
     } catch (e) {
-      console.error(e);
     } finally {
       setLoading(false);
     }
@@ -731,7 +722,6 @@ export default function Home() {
       )}
 
       {!gameType ? (
-        // Screen 1: Game Type Selection
         <div>
           <h2>Choose Game Type</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 20 }}>
@@ -756,7 +746,6 @@ export default function Home() {
           </div>
         </div>
       ) : gameType === 'private' ? (
-        // Screen 2: Private Game Setup
         <div>
           <button 
             onClick={() => setGameType(null)}
@@ -790,7 +779,6 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        // Screen 2: Public Game Setup
         <div>
           <button 
             onClick={() => setGameType(null)}
