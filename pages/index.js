@@ -1,5 +1,6 @@
 import { useRouter } from 'next/router';
 import { useState, useEffect, useRef } from 'react';
+import Head from 'next/head';
 
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL;
 
@@ -72,30 +73,39 @@ export default function Home() {
 
             matchCheckIntervalRef.current = setInterval(async () => {
               try {
-                const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ playerId }),
-                });
+                // Only poll if WebSocket is not connected
+                if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                  const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playerId }),
+                  });
 
-                if (matchRes.ok) {
-                  const matchData = await matchRes.json();
+                  if (matchRes.ok) {
+                    const matchData = await matchRes.json();
 
-                  if (matchData.matched && matchData.roomId) {
-                    clearInterval(matchCheckIntervalRef.current);
-                    const displayId = matchData.roomId.replace(/^room-/, '');
-                    router.push(`/room/${displayId}`);
-                    return;
-                  }
+                    if (matchData.matched && matchData.roomId) {
+                      clearInterval(matchCheckIntervalRef.current);
+                      const displayId = matchData.roomId.replace(/^room-/, '');
+                      router.push(`/room/${displayId}`);
+                      return;
+                    }
 
-                  if (!matchData.inQueue && !matchData.matched) {
-                    clearInterval(matchCheckIntervalRef.current);
-                    setIsQueued(false);
-                    return;
+                    if (!matchData.inQueue && !matchData.matched) {
+                      clearInterval(matchCheckIntervalRef.current);
+                      setIsQueued(false);
+                      return;
+                    }
+
+                    // If queue shows "match soon", increase polling frequency
+                    if (matchData.estimate?.type === 'countdown' && matchData.estimate.durationMs < 10000) {
+                      clearInterval(matchCheckIntervalRef.current);
+                      matchCheckIntervalRef.current = setInterval(arguments.callee, 1000);
+                    }
                   }
                 }
               } catch (e) {}
-            }, 10000);
+            }, 5000);
 
             setTimeout(() => {
               if (matchCheckIntervalRef.current) clearInterval(matchCheckIntervalRef.current);
@@ -112,6 +122,43 @@ export default function Home() {
     const playerId = localStorage.getItem('playerId');
     if (!playerId || !isQueued) return;
 
+    // Use existing room WebSocket system for matchmaking notifications
+    const setupMatchWebSocket = () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+
+      const matchmakingRoomId = 'matchmaking-notifications';
+      const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${matchmakingRoomId}/ws?playerId=${playerId}`;
+      wsRef.current = new WebSocket(wsUrl);
+
+      wsRef.current.onopen = () => {};
+
+      wsRef.current.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'matched' && data.roomId) {
+            if (matchCheckIntervalRef.current) {
+              clearInterval(matchCheckIntervalRef.current);
+            }
+            const displayId = data.roomId.replace(/^room-/, '');
+            router.push(`/room/${displayId}`);
+          }
+        } catch (e) {}
+      };
+
+      wsRef.current.onclose = () => {
+        if (isQueued) {
+          setTimeout(setupMatchWebSocket, 3000);
+        }
+      };
+
+      wsRef.current.onerror = () => {};
+    };
+
+    setupMatchWebSocket();
+    
     const heartbeat = setInterval(async () => {
       try {
         await fetch(`${BASE}/queue/heartbeat`, {
@@ -122,7 +169,12 @@ export default function Home() {
       } catch (e) {}
     }, 300000);
 
-    return () => clearInterval(heartbeat);
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      clearInterval(heartbeat);
+    };
   }, [isQueued]);
 
   const getWaitMessage = (estimateData) => {
@@ -644,7 +696,11 @@ export default function Home() {
   }
 
   return (
-    <main className="container">
+    <>
+      <Head>
+        <title>Armageddon Chess</title>
+      </Head>
+      <main className="container">
       <h1>Armageddon Chess</h1>
 
       {toast && (
@@ -765,6 +821,16 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+              <div style={{ 
+                marginTop: '8px', 
+                paddingTop: '8px', 
+                borderTop: '1px solid #dee2e6', 
+                fontSize: '11px', 
+                color: '#6c757d',
+                fontStyle: 'italic'
+              }}>
+                💡 Wait estimates are based on current game times. May take longer if players rematch or games extend beyond expected duration.
+              </div>
             </div>
             
             {/* Cancel Queue Button */}
@@ -823,5 +889,6 @@ export default function Home() {
         </div>
       )}
     </main>
+    </>
   );
 }

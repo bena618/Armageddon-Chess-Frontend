@@ -142,7 +142,7 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
           resetSelection();
         }
       } catch (err) {
-        console.error('Move failed:', err);
+        // Error handled silently
       }
       return;
     }
@@ -315,8 +315,8 @@ const Board = React.memo(function Board({ fen, colors, moves, phase, playerIdRef
                         resetSelection();
                       }
                     } catch (err) {
-                      console.error('Drag move failed:', err);
-                      // Error is already handled in makeMoveUci, no need to duplicate
+                      setError('Drag move failed');
+                      setTimeout(() => setError(null), 3000);
                     }
                   }
                   return true;
@@ -450,6 +450,8 @@ export default function Room() {
   const toastTimeoutRef = useRef(null);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showWinnerModal, setShowWinnerModal] = useState(false);
+  const [playerClosedModal, setPlayerClosedModal] = useState(false);
+  const playerClosedModalRef = useRef(false); // Use ref for immediate updates
   const playerIdRef = useRef(null);
   const wsRef = useRef(null);
   const shortPollRef = useRef(null);
@@ -627,7 +629,6 @@ export default function Room() {
     import('chess.js').then((mod) => {
       ChessJS = mod.Chess || mod.default || mod;
     }).catch((e) => {
-      console.error('Failed to load chess engine', e);
       setError('Failed to load chess engine');
     });
   }, []);
@@ -706,6 +707,7 @@ export default function Room() {
             body: JSON.stringify({ playerId: playerIdRef.current })
           });
         } catch (e) {
+          // Silently handle heartbeat failures - don't show errors to users
         }
       }, 5000);
       wsRef.current.heartbeatInterval = heartbeat;
@@ -727,6 +729,40 @@ export default function Room() {
 
           setState(room);
           updateLocalGameAndClocks(room);
+
+          // Reset startPending when game goes back to LOBBY
+          if (room.phase === 'LOBBY') {
+            setStartPending(false);
+            setShowWinnerModal(false);
+            setGameOverInfo(null);
+            setPlayerClosedModal(false);
+            playerClosedModalRef.current = false;
+            
+            // Clear winner-related state data
+            setState(prev => ({
+              ...prev,
+              result: null,
+              winnerId: null
+            }));
+          }
+
+          if (room.phase === 'FINISHED') {
+            if (room.result === 'draw') {
+              setGameOverInfo({ winnerId: null, winnerName: null, color: null });
+            } else {
+              const winner = room.players?.find(p => p.id === room.winnerId);
+              setGameOverInfo({
+                winnerId: room.winnerId,
+                winnerName: winner?.name || 'Unknown',
+                color: room.colors?.[room.winnerId] || null
+              });
+            }
+            
+            // Only show winner modal if player hasn't explicitly closed it
+            if (!playerClosedModalRef.current) {
+              setShowWinnerModal(true);
+            }
+          }
         }
       } catch (e) {
       }
@@ -781,6 +817,7 @@ export default function Room() {
       }
     }
 
+    const now = Date.now();
     const last = room.clocks?.lastTickAt || now;
     const elapsed = Math.max(0, now - last);
     const whiteMs = (room.clocks?.whiteRemainingMs || 0) - ((room.clocks?.turn === 'white') ? elapsed : 0);
@@ -849,6 +886,40 @@ export default function Room() {
             updateLocalGameAndClocks(room);
       setState(room);
 
+      // Reset startPending when game goes back to LOBBY
+      if (room.phase === 'LOBBY') {
+        setStartPending(false);
+        setShowWinnerModal(false);
+        setGameOverInfo(null);
+        setPlayerClosedModal(false);
+        playerClosedModalRef.current = false;
+        
+        // Clear winner-related state data to prevent showing old winner info
+        setState(prev => ({
+          ...prev,
+          result: null,
+          winnerId: null
+        }));
+      }
+
+      if (room.phase === 'FINISHED') {
+        if (room.result === 'draw') {
+          setGameOverInfo({ winnerId: null, winnerName: null, color: null });
+        } else {
+          const winner = room.players?.find(p => p.id === room.winnerId);
+          setGameOverInfo({
+            winnerId: room.winnerId,
+            winnerName: winner?.name || 'Unknown',
+            color: room.colors?.[room.winnerId] || null
+          });
+        }
+        
+        // Only show winner modal if player hasn't explicitly closed it
+        if (!playerClosedModalRef.current) {
+          setShowWinnerModal(true);
+        }
+      }
+
       if (data.startExpired || room.closed) {
         setMessage('Start request expired — returning to lobby');
         setTimeout(() => {
@@ -881,7 +952,7 @@ export default function Room() {
         setError('Background rejoin attempt failed');
       }
     } catch (e) {
-      setError('Failed to fetch room state');
+      // Don't show error for network issues during normal gameplay
     }
   }
 
@@ -898,7 +969,7 @@ export default function Room() {
       
       await fetchState();
     } catch (e) {
-      console.error('🔍 sendTimeForfeit error:', e);
+      // Silently handle time forfeit errors
     }
   }
 
@@ -922,7 +993,7 @@ export default function Room() {
       
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        setError('Failed to submit rematch vote');
+        setError('Failed to submit rematch vote: ' + (err.error || res.status));
         setTimeout(() => setError(null), 5000);
         return;
       }
@@ -932,11 +1003,14 @@ export default function Room() {
       if (data.rematchStarted) {
         showToast('Rematch started!', 'success');
         setStartPending(false);
+        await fetchState();
       } else {
         showToast(vote ? 'You voted Yes - waiting for opponent' : 'You voted No', 'info');
+        // Don't call fetchState() if player voted No and closed modal
+        if (!vote || !playerClosedModalRef.current) {
+          await fetchState();
+        }
       }
-      
-      await fetchState();
     } catch (e) {
       setError('Network error submitting rematch vote');
       setTimeout(() => setError(null), 5000);
@@ -994,33 +1068,13 @@ export default function Room() {
   useEffect(() => {
     if (!roomId || !joined) return;
 
-    const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-    const isOfflineMode = state?.players?.some(p => p.id?.startsWith('test-player-'));
-    
-    // Skip backend calls in offline mode
-    if (isOfflineMode) {
-      console.log('🎮 Offline mode detected - skipping backend calls');
-      return;
-    }
-    
-    if (isLocalDev || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-            fetchState();
-      const interval = setInterval(fetchState, 2000);
-      return () => clearInterval(interval);
-    } else {
-          }
+    // Only do initial fetch - rely on WebSocket for all other updates
+    fetchState();
   }, [roomId, joined]);
 
   useEffect(() => {
     const t = setInterval(() => {
       if (!state || !state.clocks || gameOverInfo) return;
-      console.log('🔍 Clock update check:', { 
-        phase: state.phase, 
-        clocks: state.clocks, 
-        gameOverInfo,
-        liveWhiteMs, 
-        liveBlackMs 
-      });
       
       const now = Date.now();
       const last = state.clocks.lastTickAt || now;
@@ -1032,6 +1086,7 @@ export default function Room() {
       setLiveWhiteMs(safeWhite);
       setLiveBlackMs(safeBlack);
 
+      // Only check for time forfeit and send to backend when time actually runs out
       if (state?.phase === 'PLAYING' && !gameOverInfo) {
         if (safeWhite <= 0 && (!state?.winnerId)) {
           const winner = state?.players?.find(p => state?.colors?.[p.id] === 'black');
@@ -1049,7 +1104,7 @@ export default function Room() {
           }
         }
       }
-    }, 2000);
+    }, 100); // Update every 100ms for smooth clock ticking
     return () => clearInterval(t);
   }, [state, gameOverInfo, timeForfeitSentRef, sendTimeForfeit]);
 
@@ -1076,36 +1131,67 @@ export default function Room() {
     await autoJoin(playerId, name.trim());
   }
 
-  async function startBidding() {
-    console.log('🔍 startBidding called:', { 
-      startPending, 
-      playersCount: state?.players?.length, 
-      maxPlayers: state?.maxPlayers,
-      phase: state?.phase,
-      startRequestedBy: state?.startRequestedBy,
-      playerId: playerIdRef.current
-    });
-    
-    if (startPending) {
-      console.log('🔍 startBidding blocked: startPending is true');
+  async function confirmStart() {
+    const backendId = getBackendRoomId();
+    if (!backendId) {
+      setError('Room ID not found');
       return;
     }
 
-    const backendId = getBackendRoomId();
     setStartPending(true);
-    setMessage('Requesting start... waiting for opponent');
+    setMessage('Confirming start...');
 
     try {
-      console.log('🔍 Sending start-bidding request to:', `${BASE}/rooms/${backendId}/start-bidding`);
-      const res = await fetch(`${BASE}/rooms/${backendId}/start-bidding`, {
+      // The second player also calls start-bidding, backend treats it as confirmation
+      const url = `${BASE}/rooms/${backendId}/start-bidding`;
+      
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId: playerIdRef.current }),
       });
-      console.log('🔍 start-bidding response:', { status: res.status, ok: res.ok });
       
       const data = await res.json().catch(() => ({}));
-      console.log('🔍 start-bidding response data:', data);
+
+      if (!res.ok) {
+        setMessage('Failed to confirm start');
+        setStartPending(false);
+        return;
+      }
+
+      setMessage('Game starting!');
+      setTimeout(() => setMessage(null), 3000);
+    } catch (e) {
+      setError('Network error confirming start: ' + e.message);
+      setStartPending(false);
+      setTimeout(() => setError(null), 5000);
+    }
+  }
+
+  async function startBidding() {
+    if (startPending) {
+      return;
+    }
+
+    const backendId = getBackendRoomId();
+    if (!backendId) {
+      setError('Room ID not found');
+      return;
+    }
+
+    setStartPending(true);
+    setMessage('Requesting start... waiting for opponent');
+
+    try {
+      const url = `${BASE}/rooms/${backendId}/start-bidding`;
+      
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: playerIdRef.current }),
+      });
+      
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setMessage('Failed to request start');
@@ -1114,25 +1200,21 @@ export default function Room() {
       }
 
       // Success - add timeout fallback to reset startPending
-      console.log('🔍 start-bidding successful, waiting for opponent');
       setTimeout(() => {
         if (startPending) {
-          console.log('🔍 Timeout fallback: resetting startPending');
           setStartPending(false);
         }
       }, 10000); // Reset after 10 seconds if no state change
-      
     } catch (e) {
-      console.error('🔍 start-bidding error:', e);
-      setMessage('Network error');
+      setError('Network error requesting start: ' + e.message);
       setStartPending(false);
+      setTimeout(() => setError(null), 5000);
     }
   }
 
   async function submitBid() {
     const minutes = parseInt(bidMinutes, 10);
     const seconds = parseInt(bidSeconds, 10);
-    console.log('🔍 submitBid called:', { minutes, seconds, bidMinutes, bidSeconds });
     
     if (isNaN(minutes) || isNaN(seconds) || (minutes === 0 && seconds === 0)) {
       setMessage('Invalid bid time');
@@ -1140,7 +1222,6 @@ export default function Room() {
     }
 
     const amountMs = (minutes * 60 + seconds) * 1000;
-    console.log('🔍 Calculated bid amountMs:', amountMs);
 
     const backendId = getBackendRoomId();
     try {
@@ -1152,23 +1233,20 @@ export default function Room() {
           amount: amountMs,
         }),
       });
-      console.log('🔍 submit-bid response:', { status: res.status, ok: res.ok });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        console.error('🔍 submit-bid error details:', err);
         setError('Bid failed: ' + (err.error || 'Unknown error'));
-        setTimeout(() => setError(null), 5000); // Auto-clear error after 5 seconds
+        setTimeout(() => setError(null), 5000);
         return;
       }
 
       setMessage('Bid submitted!');
-      setTimeout(() => setMessage(null), 3000); // Auto-clear success after 3 seconds
-      await fetchState(); // Fetch updated state after bid submission
+      setTimeout(() => setMessage(null), 3000);
+      await fetchState();
     } catch (e) {
-      console.error('🔍 submit-bid network error:', e);
       setMessage('Network error submitting bid');
-      setTimeout(() => setMessage(null), 5000); // Auto-clear after 5 seconds
+      setTimeout(() => setMessage(null), 5000);
     }
   }
 
@@ -1219,7 +1297,6 @@ export default function Room() {
     try {
       moved = test.move({ from, to, promotion: promotionPiece });
     } catch (e) {
-      console.error('Chess engine rejected move:', e);
       // Show user-friendly error for illegal moves
       setError('Illegal move - try again');
       setTimeout(() => setError(null), 3000); // Clear error after 3 seconds
@@ -1239,7 +1316,6 @@ export default function Room() {
     try {
       game.move({ from, to, promotion: promotionPiece });
     } catch (e) {
-      console.error('Failed to apply move to local game:', e);
       return false;
     }
     localGameRef.current = game;
@@ -1275,6 +1351,14 @@ export default function Room() {
         if (data.result === 'draw') {
           setGameOverInfo({ winnerId: null, winnerName: null, color: null });
           setMessage(`Draw${data.reason ? ` (${data.reason})` : ''}`);
+          
+          // Update state with result for modal
+          setState(prev => ({
+            ...prev,
+            result: 'draw',
+            winnerId: null,
+            phase: 'FINISHED'
+          }));
         } else if (data.result === 'checkmate' || data.result === 'time_forfeit') {
           const winnerId = data.winnerId || null;
           const winner = state?.players?.find(p => p.id === winnerId);
@@ -1285,6 +1369,14 @@ export default function Room() {
               ? 'Checkmate'
               : 'Win on time'
           );
+          
+          // Update state with result for modal
+          setState(prev => ({
+            ...prev,
+            result: data.result,
+            winnerId: winnerId,
+            phase: 'FINISHED'
+          }));
         }
       }
 
@@ -1399,6 +1491,14 @@ export default function Room() {
   return (
     <>
       <Head>
+        <title>
+          {state?.phase === 'PLAYING' && isMyTurn 
+            ? 'YOUR TURN! PLAY NOW!' 
+            : state?.phase === 'PLAYING' && !isMyTurn
+            ? 'Waiting for opponent...'
+            : 'Armageddon Chess'
+          }
+        </title>
         <link
           href="https://fonts.googleapis.com/css2?family=Noto+Chess:wght@400;700&display=swap"
           rel="stylesheet"
@@ -1549,12 +1649,20 @@ export default function Room() {
             border: '3px solid rgba(255, 255, 255, 0.3)'
           }}>
             {/* Trophy with animation */}
+            {/* Trophy/Result Icon with conditional animation */}
             <div style={{
               fontSize: '80px',
               marginBottom: '25px',
-              animation: 'bounce 1s ease-in-out infinite',
-              textShadow: '0 0 30px rgba(255, 215, 0, 0.8)'
-            }}>🏆</div>
+              animation: playerId === state.winnerId 
+                ? 'bounce 1s ease-in-out infinite' 
+                : 'gentle-fade 2s ease-in-out infinite alternate',
+              textShadow: playerId === state.winnerId 
+                ? '0 0 30px rgba(255, 215, 0, 0.8)'
+                : '0 0 20px rgba(100, 100, 100, 0.5)',
+              opacity: playerId === state.winnerId ? 1 : 0.7
+            }}>
+              {playerId === state.winnerId ? '🏆' : '⚫'}
+            </div>
             
             {/* Victory Title */}
             <h2 style={{
@@ -1564,11 +1672,20 @@ export default function Room() {
               textShadow: '2px 2px 4px rgba(0, 0, 0, 0.5)',
               animation: 'glow 2s ease-in-out infinite alternate'
             }}>
-              {state?.result === 'resignation' ? 'Victory by Resignation!' : 
-               state?.result === 'checkmate' ? 'Checkmate!' :
-               state?.result === 'time_forfeit' ? 'Victory on Time!' :
-               state?.result === 'draw' ? 'Draw!' :
-               'Game Over!'}
+              {(() => {
+                if (state?.result === 'resignation') {
+                  // Check if current player is the winner (not the resigner)
+                  if (playerId === state.winnerId) {
+                    return 'Victory by Resignation!';
+                  } else {
+                    return 'You Resigned';
+                  }
+                }
+                return state?.result === 'checkmate' ? 'Checkmate!' :
+                       state?.result === 'time_forfeit' ? 'Victory on Time!' :
+                       state?.result === 'draw' ? 'Draw!' :
+                       'Game Over!';
+              })()}
             </h2>
             
             {/* Winner Information */}
@@ -1582,15 +1699,16 @@ export default function Room() {
               {state?.winnerId ? (
                 <>
                   <div style={{
-                    fontSize: '28px',
+                    fontSize: '32px',
                     fontWeight: 'bold',
                     marginBottom: '10px',
                     color: '#FFD700'
                   }}>
-                    🎉 {state?.players?.find(p => p.id === state.winnerId)?.name || 'Unknown Player'} 🎉
+                    {playerId === state.winnerId ? '🎉 You Win! 🎉' : '😔 You Lose'}
                   </div>
                   <div style={{ fontSize: '18px', opacity: 0.9 }}>
-                    {state?.colors?.[state.winnerId] === 'white' ? '⚪ White' : '⚫ Black'} Wins!
+                    {state?.players?.find(p => p.id === state.winnerId)?.name || 'Unknown Player'} 
+                    {state?.colors?.[state.winnerId] === 'white' ? ' (⚪ White)' : ' (⚫ Black)'} Wins!
                   </div>
                 </>
               ) : (
@@ -1604,8 +1722,9 @@ export default function Room() {
             <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
                 onClick={() => {
-                  console.log('🔍 Winner modal closed');
                   setShowWinnerModal(false);
+                  setPlayerClosedModal(true);
+                  playerClosedModalRef.current = true;
                 }}
                 style={{
                   padding: '15px 35px',
@@ -1633,39 +1752,34 @@ export default function Room() {
                 Continue
               </button>
               
-              {/* Share Victory Button */}
+              {/* Play Again Button */}
               <button
-                onClick={() => {
-                  const winnerName = state?.players?.find(p => p.id === state.winnerId)?.name || 'Someone';
-                  const resultText = state?.result === 'draw' ? 'drew' : 'won';
-                  const shareText = `I just ${resultText} a game of Armageddon Chess! ${state?.result === 'draw' ? '' : `🏆 ${winnerName} was victorious!`}`;
-                  navigator.clipboard.writeText(shareText);
-                  // You could add a toast notification here
-                }}
+                onClick={() => sendRematchVote(true)}
                 style={{
                   padding: '15px 35px',
-                  background: 'rgba(255, 255, 255, 0.15)',
+                  background: 'linear-gradient(135deg, #28a745, #20c997)',
                   color: 'white',
-                  border: '2px solid rgba(255, 255, 255, 0.3)',
+                  border: '2px solid rgba(40, 167, 69, 0.5)',
                   borderRadius: '12px',
                   fontSize: '18px',
                   fontWeight: '600',
                   cursor: 'pointer',
                   transition: 'all 0.3s ease',
-                  backdropFilter: 'blur(10px)'
+                  backdropFilter: 'blur(10px)',
+                  boxShadow: '0 4px 15px rgba(40, 167, 69, 0.3)'
                 }}
                 onMouseOver={(e) => {
-                  e.target.style.background = 'rgba(255, 255, 255, 0.25)';
+                  e.target.style.background = 'linear-gradient(135deg, #218838, #1ea085)';
                   e.target.style.transform = 'translateY(-3px) scale(1.05)';
-                  e.target.style.boxShadow = '0 8px 25px rgba(0, 0, 0, 0.3)';
+                  e.target.style.boxShadow = '0 8px 25px rgba(40, 167, 69, 0.4)';
                 }}
                 onMouseOut={(e) => {
-                  e.target.style.background = 'rgba(255, 255, 255, 0.15)';
+                  e.target.style.background = 'linear-gradient(135deg, #28a745, #20c997)';
                   e.target.style.transform = 'translateY(0) scale(1)';
-                  e.target.style.boxShadow = 'none';
+                  e.target.style.boxShadow = '0 4px 15px rgba(40, 167, 69, 0.3)';
                 }}
               >
-                📤 Share Victory
+                🔄 Play Again
               </button>
             </div>
           </div>
@@ -1697,6 +1811,16 @@ export default function Room() {
             @keyframes glow {
               from { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 215, 0, 0.6); }
               to { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5), 0 0 30px rgba(255, 215, 0, 0.9); }
+            }
+            @keyframes gentle-fade {
+              from { 
+                opacity: 0.5;
+                transform: scale(0.95);
+              }
+              to { 
+                opacity: 0.8;
+                transform: scale(1);
+              }
             }
           `}</style>
         </div>
@@ -1802,7 +1926,10 @@ export default function Room() {
                   </div>
                 </div>
               ) : null}
-              <button onClick={startBidding} disabled={state?.players?.length < state?.maxPlayers}>
+              <button 
+                onClick={state?.startRequestedBy && state?.startRequestedBy !== playerIdRef.current ? confirmStart : startBidding} 
+                disabled={state?.players?.length < state?.maxPlayers || startPending}
+              >
                 {state?.startRequestedBy && state?.startRequestedBy !== playerIdRef.current ? 'Confirm Start' : 'Start Bidding'}
               </button>
             </div>
