@@ -18,15 +18,20 @@ export default function Home() {
   const [autoJoinPending, setAutoJoinPending] = useState(false);
   const [autoJoinCountdown, setAutoJoinCountdown] = useState(0);
   const [queueStatus, setQueueStatus] = useState({});
+  const [queueStatusTimestamp, setQueueStatusTimestamp] = useState(0);
+  const queueStatusTimestampRef = useRef(0);
   const [isQueued, setIsQueued] = useState(false);
+  const isQueuedRef = useRef(false); // Track queue state immediately
   const [queueStartTime, setQueueStartTime] = useState(null);
   const [queueTimeRemaining, setQueueTimeRemaining] = useState(null);
   const [toast, setToast] = useState(null);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
   const autoJoinTimerRef = useRef(null);
   const autoJoinIntervalRef = useRef(null);
   const matchCheckIntervalRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const wsRef = useRef(null);
+  const lobbyWsRef = useRef(null);
 
   const showToast = (message, type = 'info') => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -69,45 +74,11 @@ export default function Home() {
             const playerName = localStorage.getItem('playerName');
             if (playerName) setName(playerName);
 
-            if (matchCheckIntervalRef.current) clearInterval(matchCheckIntervalRef.current);
-
-            matchCheckIntervalRef.current = setInterval(async () => {
-              try {
-                if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-                  const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ playerId }),
-                  });
-
-                  if (matchRes.ok) {
-                    const matchData = await matchRes.json();
-
-                    if (matchData.matched && matchData.roomId) {
-                      clearInterval(matchCheckIntervalRef.current);
-                      const displayId = matchData.roomId.replace(/^room-/, '');
-                      router.push(`/room/${displayId}`);
-                      return;
-                    }
-
-                    if (!matchData.inQueue && !matchData.matched) {
-                      clearInterval(matchCheckIntervalRef.current);
-                      setIsQueued(false);
-                      return;
-                    }
-
-                    if (matchData.estimate?.type === 'countdown' && matchData.estimate.durationMs < 10000) {
-                      clearInterval(matchCheckIntervalRef.current);
-                      matchCheckIntervalRef.current = setInterval(arguments.callee, 1000);
-                    }
-                  }
-                }
-              } catch (e) {}
-            }, 5000);
-
-            setTimeout(() => {
-              if (matchCheckIntervalRef.current) clearInterval(matchCheckIntervalRef.current);
-            }, 120000);
+            // No polling needed - WebSocket will handle everything
+            if (matchCheckIntervalRef.current) {
+              clearInterval(matchCheckIntervalRef.current);
+              matchCheckIntervalRef.current = null;
+            }
           }
         }
       } catch (e) {}
@@ -126,53 +97,171 @@ export default function Home() {
       }
 
       const matchmakingRoomId = 'matchmaking-notifications';
-      const wsUrl = `${BASE.replace(/^http/, 'ws')}/rooms/${matchmakingRoomId}/ws?playerId=${playerId}`;
+      const wsUrl = `${BASE.replace(/^http/, 'ws')}/queue/ws?playerId=${playerId}`;
       wsRef.current = new WebSocket(wsUrl);
 
-      wsRef.current.onopen = () => {};
+      wsRef.current.onopen = () => {
+        setConnectionAttempts(0);
+      };
 
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           
           if (data.type === 'matched' && data.roomId) {
+            const currentPlayerId = localStorage.getItem('playerId');
+            if (data.playerIds && !data.playerIds.includes(currentPlayerId)) {
+              return;
+            }
+            
             if (matchCheckIntervalRef.current) {
               clearInterval(matchCheckIntervalRef.current);
+              matchCheckIntervalRef.current = null;
             }
+            
+            if (wsRef.current) {
+              wsRef.current.close();
+              wsRef.current = null;
+            }
+            
+            if (lobbyWsRef.current) {
+              lobbyWsRef.current.close();
+              lobbyWsRef.current = null;
+            }
+            
             const displayId = data.roomId.replace(/^room-/, '');
             router.push(`/room/${displayId}`);
           }
-        } catch (e) {}
+          
+          if (data.type === 'player_joined') {
+            setQueueStatus(prev => ({
+              ...prev,
+              [data.playerId]: { type: 'player_joined', timestamp: Date.now() }
+            }));
+          }
+          
+          if (data.type === 'queue_update') {
+          }
+          
+          if (data.type === 'queue_status') {
+            setQueueStatus(data.estimates || {});
+          }
+        } catch (e) {
+          console.log('WebSocket message error:', e);
+        }
       };
 
       wsRef.current.onclose = () => {
         if (isQueued) {
-          setTimeout(setupMatchWebSocket, 3000);
+          const newAttempts = connectionAttempts + 1;
+          setConnectionAttempts(newAttempts);
+          
+          if (newAttempts >= 3) {
+            showToast('Matchmaking server is updating. Please try again in a few minutes.', 'error');
+            setIsQueued(false);
+            setConnectionAttempts(0);
+          } else {
+            showToast(`Connection issue (attempt ${newAttempts}/3). Retrying...`, 'warning');
+            setTimeout(() => {
+              setupMatchWebSocket();
+            }, 3000);
+          }
         }
       };
 
-      wsRef.current.onerror = () => {};
+      wsRef.current.onerror = (error) => {
+        console.log('WebSocket error:', error);
+        // Let onclose handle reconnection logic
+      };
     };
 
     setupMatchWebSocket();
     
-    const heartbeat = setInterval(async () => {
-      try {
-        await fetch(`${BASE}/queue/heartbeat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ playerId }),
-        });
-      } catch (e) {}
-    }, 300000);
+    // No heartbeat polling - pure WebSocket system
 
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
       }
-      clearInterval(heartbeat);
     };
   }, [isQueued]);
+
+  // Fetch queue status for all users viewing public game page
+  useEffect(() => {
+    if (gameType !== 'public') return;
+
+    const setupLobbyWebSocket = () => {
+      if (lobbyWsRef.current) {
+        lobbyWsRef.current.close();
+      }
+
+      const wsUrl = `${BASE.replace(/^http/, 'ws')}/lobby/ws`;
+      lobbyWsRef.current = new WebSocket(wsUrl);
+
+      lobbyWsRef.current.onopen = () => {
+      };
+
+      lobbyWsRef.current.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'queue_status' || data.type === 'queue_update') {
+            if (isQueuedRef.current) {
+              return;
+            }
+            
+            if (!data.timestamp || data.timestamp > queueStatusTimestampRef.current) {
+              setQueueStatus(data.estimates || {});
+              setQueueStatusTimestamp(data.timestamp || Date.now());
+              queueStatusTimestampRef.current = data.timestamp || Date.now();
+            }
+          }
+        } catch (e) {
+          console.log('❌ Lobby WebSocket message error:', e);
+        }
+      };
+
+      lobbyWsRef.current.onclose = () => {
+        setTimeout(() => {
+          if (gameType === 'public') {
+            setupLobbyWebSocket();
+          }
+        }, 5000);
+      };
+
+      lobbyWsRef.current.onerror = (error) => {
+        console.log('Lobby WebSocket error:', error);
+      };
+    };
+
+    setupLobbyWebSocket();
+
+    return () => {
+      if (lobbyWsRef.current) {
+        lobbyWsRef.current.close();
+      }
+    };
+  }, [gameType]);
+
+  const refreshQueueStatus = async (showToastMessage = true) => {
+    try {
+      const res = await fetch(`${BASE}/queue/status`);
+      if (res.ok) {
+        const data = await res.json();
+        const now = Date.now();
+        setQueueStatus(data.estimates || {});
+        setQueueStatusTimestamp(now);
+        queueStatusTimestampRef.current = now;
+        if (showToastMessage) {
+          showToast('Queue status updated', 'success');
+        }
+      }
+    } catch (e) {
+      if (showToastMessage) {
+        showToast('Failed to update queue status', 'error');
+      }
+    }
+  };
 
   const getWaitMessage = (estimateData) => {
     if (!estimateData) return ' • No estimate';
@@ -197,59 +286,8 @@ export default function Home() {
     }
   };
 
-  const fetchQueueStatus = async () => {
-    try {
-      const res = await fetch(`${BASE}/queue/status`);
-      if (res.ok) {
-        const data = await res.json();
-        setQueueStatus(data.estimates || {});
-      }
-    } catch (e) {}
-  };
-
-  useEffect(() => {
-    if (!isQueued || !queueStartTime) return;
-
-    const updateRemainingTime = () => {
-      const elapsed = Date.now() - queueStartTime;
-      const remaining = Math.max(0, 20 * 60 * 1000 - elapsed);
-      setQueueTimeRemaining(remaining);
-
-      if (remaining === 0) {
-        cancelQueue();
-        showToast('You\'ve been in queue for 20 minutes and have been automatically removed. Please rejoin if you still want to play.', 'warning');
-      }
-    };
-
-    updateRemainingTime();
-    const interval = setInterval(updateRemainingTime, 1000);
-
-    return () => clearInterval(interval);
-  }, [isQueued, queueStartTime]);
-
-  useEffect(() => {
-    if (gameType !== 'public') return;
-
-    fetchQueueStatus();
-    const interval = setInterval(fetchQueueStatus, 60000);
-
-    return () => clearInterval(interval);
-  }, [gameType]);
-
-  useEffect(() => {
-    if (!isQueued) return;
-
-    fetchQueueStatus();
-
-    const updateInterval = () => {
-      const hasCountdowns = Object.values(queueStatus).some(status => status?.estimate?.type === 'countdown');
-      return hasCountdowns ? 30000 : 120000;
-    };
-
-    const interval = setInterval(fetchQueueStatus, updateInterval());
-
-    return () => clearInterval(interval);
-  }, [isQueued]);
+  // Queue status and time remaining will be updated via WebSocket messages
+  // No polling needed - pure WebSocket system
 
   const cancelQueue = async () => {
     const playerId = localStorage.getItem('playerId');
@@ -267,6 +305,7 @@ export default function Home() {
         body: JSON.stringify({ playerId }),
       });
       setIsQueued(false);
+      isQueuedRef.current = false; // Reset ref immediately
       setQueueStartTime(null);
       setQueueTimeRemaining(null);
 
@@ -274,7 +313,10 @@ export default function Home() {
         const res = await fetch(`${BASE}/queue/status`);
         if (res.ok) {
           const data = await res.json();
+          const now = Date.now();
           setQueueStatus(data.estimates || {});
+          setQueueStatusTimestamp(now);
+          queueStatusTimestampRef.current = now;
         }
       } catch (e) {}
 
@@ -312,6 +354,7 @@ export default function Home() {
       showToast('Please enter your name', 'warning');
       return;
     }
+    
     setLoading(true);
     
     const playerId = getOrCreatePlayerId();
@@ -356,43 +399,17 @@ export default function Home() {
       
       if (data.queued) {
         setIsQueued(true);
+        isQueuedRef.current = true;
         setQueueStartTime(Date.now());
         showToast(`You're in queue for ${time} minutes. Position: ${data.queuePosition || 1}. You'll be matched automatically!`, 'success');
         setLoading(false);
         
+        refreshQueueStatus(false);
+        
         if (matchCheckIntervalRef.current) {
           clearInterval(matchCheckIntervalRef.current);
+          matchCheckIntervalRef.current = null;
         }
-        
-        matchCheckIntervalRef.current = setInterval(async () => {
-                    try {
-            const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ playerId }),
-            });
-            
-            if (matchRes.ok) {
-              const matchData = await matchRes.json();
-              
-              if (matchData.matched && matchData.roomId) {
-                clearInterval(matchCheckIntervalRef.current);
-                localStorage.setItem('playerName', name.trim());
-                const displayId = matchData.roomId.replace(/^room-/, '');
-                router.push(`/room/${displayId}`);
-                return;
-              }
-              
-              if (!matchData.inQueue && !matchData.matched) {
-                clearInterval(matchCheckIntervalRef.current);
-                setIsQueued(false);
-                setLoading(false);
-                return;
-              }
-            }
-          } catch (e) {
-                      }
-        }, 10000);
         
         setTimeout(() => {
           if (matchCheckIntervalRef.current) {
@@ -411,6 +428,7 @@ export default function Home() {
       showToast('Please enter your name', 'warning');
       return;
     }
+    
     setLoading(true);
     
     const playerId = getOrCreatePlayerId();
@@ -447,12 +465,14 @@ export default function Home() {
         showToast(`You're in queues for: ${data.joinedQueues.join(', ')} minutes. You'll be matched automatically!`, 'success');
         setLoading(false);
         
+        refreshQueueStatus(false);
+        
         if (matchCheckIntervalRef.current) {
           clearInterval(matchCheckIntervalRef.current);
         }
         
         matchCheckIntervalRef.current = setInterval(async () => {
-                    try {
+          try {
             const matchRes = await fetch(`${BASE}/queue/checkMatch`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -478,7 +498,7 @@ export default function Home() {
               }
             }
           } catch (e) {
-                      }
+          }
         }, 10000);
         
         setTimeout(() => {
@@ -800,14 +820,38 @@ export default function Home() {
             
             {/* Queue Status Display */}
             <div style={{ background: '#f8f9fa', padding: '12px', borderRadius: '6px', marginBottom: 16 }}>
-              <h4 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>Current Queue Status:</h4>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 8px 0' }}>
+                <h4 style={{ margin: 0, fontSize: '14px' }}>
+                  📊 Live Queue Status
+                  <span style={{ fontSize: '10px', color: '#28a745', marginLeft: '8px' }}>● Real-time</span>
+                </h4>
+              </div>
               <div style={{ display: 'flex', gap: 16, fontSize: '12px' }}>
-                {TIME_CONTROLS.map(tc => (
-                  <div key={tc.minutes}>
-                    <strong>{tc.display}:</strong> {queueStatus[tc.ms]?.queueLength || 0} waiting
-                    {getWaitMessage(queueStatus[tc.ms]?.estimate)}
-                  </div>
-                ))}
+                {TIME_CONTROLS.map(tc => {
+                  const queueData = queueStatus[tc.ms.toString()];
+                  const queueLength = queueData?.queueLength || 0;
+                  const estimate = queueData?.estimate;
+                  
+                  return (
+                    <div key={tc.minutes} style={{ 
+                      padding: '8px', 
+                      background: queueLength > 0 ? '#e8f5e8' : '#f8f9fa',
+                      borderRadius: '4px',
+                      border: queueLength > 0 ? '1px solid #28a745' : '1px solid #dee2e6'
+                    }}>
+                      <strong>{tc.display}:</strong> {queueLength} waiting
+                      {estimate && (
+                        <div style={{ 
+                          color: estimate.type === 'match_now' ? '#28a745' : '#666',
+                          fontWeight: estimate.type === 'match_now' ? 'bold' : 'normal'
+                        }}>
+                          {estimate.type === 'match_now' && '🔥 '}
+                          {estimate.message}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <div style={{ 
                 marginTop: '8px', 
@@ -817,7 +861,7 @@ export default function Home() {
                 color: '#6c757d',
                 fontStyle: 'italic'
               }}>
-                💡 Wait estimates are based on current game times. May take longer if players rematch or games extend beyond expected duration.
+                � Updates automatically when players join or leave queues
               </div>
             </div>
             
